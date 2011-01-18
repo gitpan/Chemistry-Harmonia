@@ -1,0 +1,26 @@
+--- #YAML:1.0
+name:               Chemistry-Harmonia
+version:            0.05
+abstract:           Decision of simple and difficult chemical puzzles.
+author:
+    - Alessandro Gorohovski <angel@feht.dgtu.donetsk.ua>
+license:            unknown
+distribution_type:  module
+configure_requires:
+    ExtUtils::MakeMaker:  0
+build_requires:
+    ExtUtils::MakeMaker:  0
+requires:
+    Algorithm::Combinatorics:  0.25
+    Carp:                 0
+    Chemistry::File::Formula:  0.37
+    Inline::Files:        0.63
+    Test::More:           0
+no_index:
+    directory:
+        - t
+        - inc
+generated_by:       ExtUtils::MakeMaker version 6.54
+meta-spec:
+    url:      http://module-build.sourceforge.net/META-spec-v1.4.html
+    version:  1.4

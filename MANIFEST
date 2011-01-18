@@ -1,0 +1,7 @@
+Changes
+Makefile.PL
+MANIFEST
+README
+t/Chemistry-Harmonia.t
+lib/Chemistry/Harmonia.pm
+META.yml                                 Module meta-data (added by MakeMaker)
