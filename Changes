@@ -1,5 +1,20 @@
 Revision history for Perl extension Chemistry::Harmonia.
 
+0.07  Sun Jun 12 22:22:22 2011
+	- 'good_formula' subroutine is added.
+	- 'prepare_mix' subroutine is added.
+	- 'class_cir_brutto' subroutine is added.
+	- 'ttc_reaction' subroutine is added.
+	- Protesting over 22,100 unique inorganic reactions.
+	- For 'oxidation_state' is considerable refined the algorithm.
+	- Protesting over 6,200 well and few know unique inorganic substances.
+	- For 'parse_chem_mix' is considerable refined the algorithm.
+	- Numerous errors are eliminated and others.
+	- The documentation is added.
+	- Tests for all subroutines are added and optimized the existing.
+
+0.06*  Top secret version. For internal use.
+
 0.05  Tue Dec  7 16:40:17 2010
 	- original version; created by h2xs 1.23 with options
 		-XAn Chemistry::Harmonia

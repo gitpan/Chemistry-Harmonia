@@ -1,4 +1,4 @@
-Chemistry-Harmonia version 0.05
+Chemistry-Harmonia version 0.07
 ===============================
 
 The module provides the necessary subroutines to solve some puzzles of the
@@ -24,8 +24,13 @@ DEPENDENCIES
 
 This module requires these other modules and libraries:
 
-Algorithm::Combinatorics
 Chemistry::File::Formula
+Algorithm::Combinatorics
+Regexp::Common
+Math::BigInt
+Math::BigRat
+Math::Assistant
+String::CRC::Cksum
 Inline::Files
 Test::More
 Carp
