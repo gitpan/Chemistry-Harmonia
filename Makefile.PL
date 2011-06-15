@@ -14,7 +14,9 @@ WriteMakefile(
 	    'Math::BigRat'	=> '0.2602',
             'Inline::Files'	=> '0.64',
             'Carp'		=> '0',
-            'Test::More'	=> '0',
+            'Test::More'	=> '0.98',
+            'Test::LongString'	=> '0.15',
+            'Test::Pod'		=> '1.45',
     },
     dist => {
         COMPRESS => 'gzip -9f',

@@ -1,5 +1,8 @@
 Revision history for Perl extension Chemistry::Harmonia.
 
+0.0777  Wed Jun 15 22:22:22 2011
+	- add to Makefile.PL modules Test::LongString & Test::Pod
+
 0.07  Sun Jun 12 22:22:22 2011
 	- 'good_formula' subroutine is added.
 	- 'prepare_mix' subroutine is added.
