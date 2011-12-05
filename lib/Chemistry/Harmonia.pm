@@ -11,8 +11,10 @@ use String::CRC::Cksum qw( cksum );
 use Math::BigInt qw( blcm bgcd );
 use Math::BigRat;
 use Math::Assistant qw(:algebra);
-use Inline::Files;
 use Regexp::Common;
+
+use Data::Dumper;
+
 
 require Exporter;
 
@@ -44,7 +46,7 @@ our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
 
 our @EXPORT = qw( );
 
-our $VERSION = '0.0777';
+our $VERSION = '0.08';
 
 use base qw(Exporter);
 
@@ -55,32 +57,50 @@ sub good_formula{
     my $opts = shift;
 
     for( $substance ){
-	s/j/I/ig;	# Replacement by iodine
-	1 while s/(?<!\d)0(?![,.]\d)/o/g; # must be oxigen?
+	my $m = '(?:1|!|\|)';	# mask
+
+	# Replacement by iodine
+	s/^(\W*)$m(\d*)$/$1I$2/;
+	s/j/I/ig;
+
+	s/\$/s/g; # for 'S' or 's'
+
+	s/((?:^|[^BCGLNPRT])A)$m/$1l/ig;	# for 'Al'
+	s/((?:^|[^ACT])L)$m/$1i/ig;	# for 'Li'
+
+	1 while s/(?<!\d)0(?![,.]\d)/o/g; # Is it oxigen?
+
+	s/(?<=[ACT])$m(?=\D|$)/l/ig;	# for Al, Cl, Tl
+	s/(?<=[BLNS])$m(?=\D|$)/i/ig;	# for Bi, Li, Ni, Si (without Ti)
+
+	s/Q/O/g; # for oxigen
+	s/(?<=[AHMRS])q/g/ig;	# for Aq, Hq, Mq, Rq, Sq
     }
 
     my(@maU, @maUl);
     my %sa;	# Letters of possible atoms
 
+    my $adb = &_atoms_db;
+
     # Possible atoms of substance
-    open PERIODIC;
-    while(<PERIODIC>){
-	if( /^(\w+)/ ){
-	    $_ = $1;
-	    if( $substance =~ /$_/i ){
-		if( length > 1 ){
-		    push @maUl, $_; # Double symbol: 1th - CAPITAL, 2th - small
-		}else{
-		    push @maU, $_; # Unary symbol
-		}
-		$sa{ uc $_ } = '' for split //; # String of CAPITAL letters
-	    }
+    for( my $i = 0; $i < @$adb; $i+=4 ){
+	$_ = $adb->[$i];
+
+	next if $substance !~ /$_/i;
+
+	if( length > 1 ){
+	    push @maUl, $_; # Double chem.symbol: 1th - CAPITAL, 2th - small
+
+	}else{
+	    push @maU, $_; # Unary chem.symbol
 	}
+	$sa{ uc $_ } = '' for split //; # String of CAPITAL letters
     }
-    close PERIODIC;
 
     # All atom letters (CAPITAL)
     my $sas = join('', keys %sa) || return;
+
+    my $mz = '(?<!1)0';	# mask for 'zero2oxi'
 
     for( $substance ){
 	s/,/./g;
@@ -96,8 +116,20 @@ sub good_formula{
 	# remove bordering brackets
 	s/^.|.$//g while /($RE{balanced}{-parens=>'(){}[]'})/g && $_ eq $1;
 
-	# Double symbol similar unary with coefficint
-	return [ "\u$_", uc ] if /^@maUl\d+$/i && /^(?i:[@maU])\L[@maU]\d+$/;
+	# do small the last symbol of double
+	s/([AEGLMR])(?=[^a-z]|$)/\l$1/g;
+
+	# Double symbol similar unary with coefficient in the end
+	if( /^@maUl\d+$/i && @maU && /^(?i:[@maU])\L[@maU]\d+$/ ){
+	    my @cf = ("\u$_", uc);
+
+	    if( /$mz/ && exists( $opts->{'zero2oxi'} ) ){
+		my @a = @cf;
+		s/$mz/O/g for @a;
+		return [ @cf, @a ];
+	    }
+	    return \@cf;
+	}
 
 	# Normalization of oxide-coated formulas (written through '*')
 	if(/\*/){
@@ -138,14 +170,13 @@ sub good_formula{
     }
 
     my $cf = [''];
-    my $mz = '(?<!1)0(?=[^1-9]|$)';	# mask for 'zero2oxi'
-
     for my $s (split /((?:\d|\(|\)|\[|\]|\{|\})+)/,$substance){
 
 	if( $s =~ /[$sas]/i ){ # Atom symbols
 	    &_in_gf($s, \@maU, \@maUl, $cf);
 	
 	}elsif($s =~ /$mz/ && exists( $opts->{'zero2oxi'} ) ){ # Zero symbols
+
 	    my $z = $s;
 	    $s =~ s/$mz/O/g;	# oxigen
 	    my $n = $#{$cf};
@@ -470,7 +501,7 @@ croak("'$s' is not substance!");
 	croak("No balance of '$k' atom!") if $v == 1;
     }
 
-    # Atom (stoicheometry) matrix vectors (quantity of atoms for each substance)
+    # Atom (stoichiometry) matrix vectors (quantity of atoms for each substance)
     my %atoms_substance;
     for my $subs (keys %tmp_subs){
 	$atoms_substance{$subs} = [ map { $tmp_subs{$subs}{$_} || 0 } keys %atoms ];
@@ -911,20 +942,16 @@ sub _read_atoms{
     my %atom_OS;	# oxidation state
     my $intermet = 1;	# for intermetallic compound
 
-    open PERIODIC;
-    while(<PERIODIC>){
-	s/\s*#.*//g;		# Delete comments
-	next if /^\s*$/;	# To discard blank lines
-	chomp;
-	my ($e, $neg, $metal, $os) = split /\s+/;
+    my $adb = &_atoms_db;
 
-	next if !defined $e || !exists $atoms->{ $e };
+    for( my $i = 0; $i < @$adb; $i+=4 ){
+	$_ = $adb->[$i];
+	next if !exists $atoms->{ $_ };
 
-	$atom_el_neg{ $e } = $neg;
-	$atom_OS{ $e } = [ split ';',$os ];
-	$intermet = 0 unless $metal;	# Not intermetallic compound
+	$atom_el_neg{ $_ } = $adb->[$i+1];
+	$intermet = 0 unless $adb->[$i+2];	# Not intermetallic compound
+	$atom_OS{ $_ } = $adb->[$i+3];
     }
-    close PERIODIC;
 
     \%atom_el_neg, \%atom_OS, $intermet;
 }
@@ -938,15 +965,13 @@ sub _read_ions {
     my $chem_sub = shift;
     my %ions;
 
-    open IONS;
+    my $idb = &_ions_db;
 
     # Construct pattern
-    while(<IONS>){
-	chomp;
-	s/\s*#.*//g;
-	next if /^\s*$/;
+    for( my $j = 0; $j < @$idb; $j+=2 ){
+	my $frm = $idb->[$j];
+	my $os = $idb->[$j+1];
 
-	my ($frm, $os) = split /\s+/; # formula (mask) and OSE list
 	my %a = split /_|=/,$os; # Parse to element end OSE
 
 	if($os =~ /~/){ # Macro-substitutions
@@ -1014,7 +1039,6 @@ ELEMENT_MACRO_1:
 	    }
 	}
     }
-    close IONS;
 
     \%ions;
 }
@@ -1023,265 +1047,306 @@ ELEMENT_MACRO_1:
 # Pauling scale (adapted)
 # Attention!
 #	order of OSE is important (last are exotic OSE)
-__PERIODIC__
-Ac	110	1	0;3
-Ag	193	1	0;1;2;3;5
-Al	161	1	-3;0;1;2;3
-Am	113	1	0;2;3;4;5;6
-Ar	0	0	0
-As	221	0	-3;0;3;5	# 2
-At	225	0	-1;0;1;5;7	# 3
-Au	254	1	0;1;2;3;5;7	# -1
-B	204	0	-3;0;1;2;3
-Ba	89	1	0;2
-Be	157	1	0;2
-Bh	0	1	0;7
-Bi	221	0	-3;0;2;3;5
-Bk	130	1	0;3;4
-Br	296	0	-1;0;1;3;4;5;6;7
-C	255	0	-4;-3;-1;0;2;3;4	# -2;1
-Ca	100	1	0;2
-Cd	169	1	0;2
-Ce	112	1	0;3;4		# 2
-Cf	130	1	0;2;3;4
-Cl	316	0	-1;0;1;3;4;5;6;7	# 2
-Cm	128	1	0;3;4
-Co	188	1	0;1;2;3;4	# -1; 5
-Cr	166	1	0;1;2;3;4;5;6	# -2;-1
-Cs	79	1	0;1
-Cu	190	1	0;1;2;3		# 4
-D	220	0	-1;0;1
-Db	0	1	0;5
-Ds	0	1	0
-Dy	122	1	0;3;4		# 2
-Er	124	1	0;3
-Es	130	1	0;2;3
-Eu	120	1	0;2;3
-F	400	0	-1;0
-Fe	183	1	0;2;3;6;8;4	# -2;-1; 1; 5
-Fm	130	1	0;2;3
-Fr	70	1	0;1
-Ga	181	1	0;1;2;3
-Gd	120	1	0;3		# 1; 2
-Ge	201	0	-4;-2;0;2;4	# 1; 3
-H	220	0	-1;0;1
-He	0	0	0
-Hf	130	1	0;2;3;4
-Hg	200	1	0;1;2		# 4
-Ho	123	1	0;3
-Hs	0	1	0;7
-I	266	0	-1;0;1;3;5;7
-In	178	1	0;1;2;3
-Ir	220	1	0;1;2;3;4;5;6;8	# -3;-1
-K	82	1	0;1
-Kr	0	0	0;2;4;6
-Ku	0	1	0
-La	110	1	0;3		# 2
-Li	98	1	0;1
-Lr	129	1	0;3
-Lu	127	1	0;3
-Md	130	1	0;2;3
-Mg	131	1	0;2
-Mn	155	1	0;1;2;3;4;5;6;7	# -3;-2;-1
-Mo	216	1	0;2;3;4;5;6	# -2;-1; 1
-Mt	0	1	0;4
-N	304	0	-3;-2;-1;0;1;2;3;4;5
-Na	93	1	0;1
-Nb	160	1	0;1;2;3;4;5	# -1
-Nd	114	1	0;3		# 2
-Ne	0	0	0
-Ni	191	1	0;2;3;4;1	# -1
-No	130	1	0;2;3
-Np	136	1	0;3;4;5;6	# 7
-Ns	0	1	0
-O	344	0	-2;-1;0;1;2
-Os	220	1	0;2;3;4;5;6;7;8	# -2;-1; 1
-P	221	0	-3;-2;0;1;3;4;5	# -1; 2
-Pa	150	1	0;3;4;5
-Pb	233	1	-4;0;2;4
-Pd	220	1	0;1;2;3;4
-Pm	113	1	0;3
-Po	200	1	-2;0;2;4;6
-Pr	113	1	0;3;4		# 2
-Pt	228	1	0;2;3;4;5;6;1
-Pu	128	1	0;2;3;4;5;6	# 7
-Ra	90	1	0;2;4
-Rb	82	1	0;1
-Re	190	1	0;1;2;3;4;5;6;7	# -3;-1
-Rf	0	1	0;4
-Rg	0	1	0
-Rh	228	1	0;1;2;3;4;6	# -1; 5
-Rn	0	0	0;2;4;6;8
-Ru	220	1	0;2;3;4;5;6;7;8	# -2; 1
-S	258	0	-2;0;1;2;3;4;6	#-1; 5
-Sb	221	1	-3;0;3;4;5
-Sc	136	1	0;3		# 1; 2
-Se	255	0	-2;0;2;4;6	
-Sg	0	1	0;6
-Si	190	0	-4;0;2;4	# -3;-2;-1; 1; 3
-Sm	117	1	0;2;3
-Sn	196	1	-4;-2;0;2;4
-Sr	95	1	0;2
-T	220	0	-1;0;1
-Ta	150	1	0;1;2;3;4;5	# -1
-Tb	110	1	0;3;4		# 1
-Tc	190	1	0;1;2;3;4;5;6;7	# -3;-1
-Te	221	0	-2;0;2;4;6	# 5
-Th	130	1	0;2;3;4
-Ti	154	1	-2;0;2;3;4	# -1
-Tl	162	1	0;1;3
-Tm	125	1	0;2;3
-U	138	1	0;3;4;5;6
-V	163	1	0;2;3;4;5	# -1; 1
-W	220	1	0;2;3;4;5;6	# -2;-1; 1
-Xe	0	0	0;1;2;4;6;8
-Y	122	1	0;3		# 1; 2
-Yb	110	1	0;2;3
-Zn	165	1	0;2
-Zr	133	1	0;2;3;4		# 1
+sub _atoms_db{
+		return [
+'Ac',	110,	1,	[0, 3],
+'Ag',	193,	1,	[0, 1, 2, 3, 5],
+'Al',	161,	1,	[-3, 0, 1, 2, 3],
+'Am',	113,	1,	[0, 2, 3, 4, 5, 6],
+'Ar',	0,	0,	[0],
+'As',	221,	0,	[-3, 0, 3, 5],	# 2
+'At',	225,	0,	[-1, 0, 1, 5, 7],	# 3
+'Au',	254,	1,	[0, 1, 2, 3, 5, 7],	# -1
+'B',	204,	0,	[-3, 0, 1, 2, 3],
+'Ba',	89,	1,	[0, 2],
+'Be',	157,	1,	[0, 2],
+'Bh',	0,	1,	[0, 7],
+'Bi',	221,	0,	[-3, 0, 2, 3, 5],
+'Bk',	130,	1,	[0, 3, 4],
+'Br',	296,	0,	[-1, 0, 1, 3, 4, 5, 6, 7],
+'C',	255,	0,	[-4, -3, -1, 0, 2, 3, 4],	# -2, 1
+'Ca',	100,	1,	[0, 2],
+'Cd',	169,	1,	[0, 2],
+'Ce',	112,	1,	[0, 3, 4],	# 2
+'Cf',	130,	1,	[0, 2, 3, 4],
+'Cl',	316,	0,	[-1, 0, 1, 3, 4, 5, 6, 7],	# 2
+'Cm',	128,	1,	[0, 3, 4],
+'Co',	188,	1,	[0, 1, 2, 3, 4],	# -1,  5
+'Cr',	166,	1,	[0, 1, 2, 3, 4, 5, 6],	# -2, -1
+'Cs',	79,	1,	[0, 1],
+'Cu',	190,	1,	[0, 2, 1, 3],		# 4
+'D',	220,	0,	[-1, 0, 1],
+'Db',	0,	1,	[0, 5],
+'Ds',	0,	1,	[0],
+'Dy',	122,	1,	[0, 3, 4],	# 2
+'Er',	124,	1,	[0, 3],
+'Es',	130,	1,	[0, 2, 3],
+'Eu',	120,	1,	[0, 2, 3],
+'F',	400,	0,	[-1, 0],
+'Fe',	183,	1,	[0, 2, 3, 6, 8, 4, 5],	# -2, -1,  1
+'Fm',	130,	1,	[0, 2, 3],
+'Fr',	70,	1,	[0, 1],
+'Ga',	181,	1,	[0, 1, 2, 3],
+'Gd',	120,	1,	[0, 3],		# 1,  2
+'Ge',	201,	0,	[-4, -2, 0, 2, 4],	# 1,  3
+'H',	220,	0,	[-1, 0, 1],
+'He',	0,	0,	[0],
+'Hf',	130,	1,	[0, 2, 3, 4],
+'Hg',	200,	1,	[0, 1, 2],	# 4
+'Ho',	123,	1,	[0, 3],
+'Hs',	0,	1,	[0, 7],
+'I',	266,	0,	[-1, 0, 1, 3, 5, 7],
+'In',	178,	1,	[0, 1, 2, 3],
+'Ir',	220,	1,	[0, 1, 2, 3, 4, 5, 6, 8],	# -3, -1
+'K',	82,	1,	[0, 1],
+'Kr',	0,	0,	[0, 2, 4, 6],
+'Ku',	0,	1,	[0],
+'La',	110,	1,	[0, 3],		# 2
+'Li',	98,	1,	[0, 1],
+'Lr',	129,	1,	[0, 3],
+'Lu',	127,	1,	[0, 3],
+'Md',	130,	1,	[0, 2, 3],
+'Mg',	131,	1,	[0, 2],
+'Mn',	155,	1,	[0, 1, 2, 3, 4, 5, 6, 7],	# -3, -2, -1
+'Mo',	216,	1,	[0, 2, 3, 4, 5, 6],	# -2, -1,  1
+'Mt',	0,	1,	[0, 4],
+'N',	304,	0,	[-3, -2, -1, 0, 1, 2, 3, 4, 5],
+'Na',	93,	1,	[0, 1],
+'Nb',	160,	1,	[0, 1, 2, 3, 4, 5],	# -1
+'Nd',	114,	1,	[0, 3],		# 2
+'Ne',	0,	0,	[0],
+'Ni',	191,	1,	[0, 2, 3, 4, 1],	# -1
+'No',	130,	1,	[0, 2, 3],
+'Np',	136,	1,	[0, 3, 4, 5, 6],	# 7
+'Ns',	0,	1,	[0],
+'O',	344,	0,	[-2, -1, 0, 1, 2],
+'Os',	220,	1,	[0, 2, 3, 4, 5, 6, 7, 8],	# -2, -1,  1
+'P',	221,	0,	[-3, -2, 0, 1, 3, 4, 5],	# -1,  2
+'Pa',	150,	1,	[0, 3, 4, 5],
+'Pb',	233,	1,	[-4, 0, 2, 4],
+'Pd',	220,	1,	[0, 1, 2, 3, 4],
+'Pm',	113,	1,	[0, 3],
+'Po',	200,	1,	[-2, 0, 2, 4, 6],
+'Pr',	113,	1,	[0, 3, 4],	# 2
+'Pt',	228,	1,	[0, 2, 3, 4, 5, 6, 1],
+'Pu',	128,	1,	[0, 2, 3, 4, 5, 6],	# 7
+'Ra',	90,	1,	[0, 2, 4],
+'Rb',	82,	1,	[0, 1],
+'Re',	190,	1,	[0, 1, 2, 3, 4, 5, 6, 7],	# -3, -1
+'Rf',	0,	1,	[0, 4],
+'Rg',	0,	1,	[0],
+'Rh',	228,	1,	[0, 1, 2, 3, 4, 6],	# -1,  5
+'Rn',	0,	0,	[0, 2, 4, 6, 8],
+'Ru',	220,	1,	[0, 2, 3, 4, 5, 6, 7, 8],	# -2,  1
+'S',	258,	0,	[-2, 0, 1, 2, 3, 4, 6],	#-1,  5
+'Sb',	221,	1,	[-3, 0, 3, 4, 5],
+'Sc',	136,	1,	[0, 3],		# 1,  2
+'Se',	255,	0,	[-2, 0, 2, 4, 6],
+'Sg',	0,	1,	[0, 6],
+'Si',	190,	0,	[-4, 0, 2, 4],	# -3, -2, -1,  1,  3
+'Sm',	117,	1,	[0, 2, 3],
+'Sn',	196,	1,	[-4, -2, 0, 2, 4],
+'Sr',	95,	1,	[0, 2],
+'T',	220,	0,	[-1, 0, 1],
+'Ta',	150,	1,	[0, 1, 2, 3, 4, 5],	# -1
+'Tb',	110,	1,	[0, 3, 4],	# 1
+'Tc',	190,	1,	[0, 1, 2, 3, 4, 5, 6, 7],	# -3, -1
+'Te',	221,	0,	[-2, 0, 2, 4, 6],	# 5
+'Th',	130,	1,	[0, 2, 3, 4],
+'Ti',	154,	1,	[-2, 0, 2, 3, 4],	# -1
+'Tl',	162,	1,	[0, 1, 3],
+'Tm',	125,	1,	[0, 2, 3],
+'U',	138,	1,	[0, 3, 4, 5, 6],
+'V',	163,	1,	[0, 2, 3, 4, 5],	# -1,  1
+'W',	220,	1,	[0, 2, 3, 4, 5, 6],	# -2, -1,  1
+'Xe',	0,	0,	[0, 1, 2, 4, 6, 8],
+'Y',	122,	1,	[0, 3],		# 1,  2
+'Yb',	110,	1,	[0, 2, 3],
+'Zn',	165,	1,	[0, 2],
+'Zr',	133,	1,	[0, 2, 3, 4],		# 1
+    ]
+}
 
-__IONS__
+
 # Attention!
 #	ion-group mask consist individual atoms only
-
+sub _ions_db{
+		return [
 # hydroxide
-[^O]OH(?![efgos])	H=1_O=-2
-
-.a~O		a~Cl,Br=1_O=-2
-.IO		I=1!3_O=-2
-# nitrites, meta- antimonites, arsenites and others
-.a~O2		a~N,Sb,Al,As,Au,Cl,Br,B=3_O=-2
-.BO3		B=3_O=-2
+'[^O]OH(?![efgos])',	'H=1_O=-2',
+'.a~O',		'a~Cl,Br=1_O=-2',
+'.IO',		'I=1!3_O=-2',
+# meta- antimonites, arsenites and others
+'.a~O2',	'a~Sb,Al,Ni,As,Au,Co,Ga,Cl,Br,B=3_O=-2',
+# nitrites, dioxynitrates
+'.NO2',		'N=3!2_O=-2',
+'.BO3',		'B=3_O=-2',
 # carbonates, selenates, tellurates
-.a~O3		a~C,Se,Si,Te,Pt,Mo,Po,Mn=4_O=-2
+'.a~O3',	'a~C,Se,Si,Ni,Te,Pt,Mo,Po,Mn,Fe,Ti,Zr,Hf,Re=4_O=-2',
 # bismuthates, nitrates  and others
-.a~O3		a~Bi,N,V,Cl,Br,I=5_O=-2
+'.a~O3',	'a~Bi,N,V,Cl,Br,I,Nb,Ta=5_O=-2',
 # plumbates, silicates
-.a~O4		a~Pb,Si=4_O=-2
+'.a~O4',	'a~Pb,Si,Ge,Ti=4_O=-2',
 # ortho- antimonates, arsenates, phosphates and others
-.a~O4		a~Sb,As,P,V=5_O=-2
+'.a~O4',	'a~Sb,As,P,V,Ta,Nb=5_O=-2',
 # molybdates, tungstates, chromates and others (excepting peroxides)
-.a~O4(?=[^O]|Os|$)	a~Kr,U,S,Se,Te,Mo,W,Cr=6_O=-2
+'.a~O4(?=[^O]|Os|$)',	'a~Kr,U,S,Se,Te,Mo,W,Cr,Pu,Os=6_O=-2',
 # per- chlorates, bromates, iodates
-.a~O4		a~Cl,Br=7_O=-2
+'.a~O4',	'a~Cl,Br=7_O=-2',
 # rhodanides (thiocyanates) and for selenium
-.(?:a~CN|a~NC|CNa~|Ca~N|Na~C|NCa~)(?![a-gik-pr-u])	a~S,Se=-2_C=4_N=-3
+'.(?:a~CN|a~NC|CNa~|Ca~N|Na~C|NCa~)(?![a-gik-pr-u])',	'a~S,Se=-2_C=4_N=-3',
 # ortho-/meta- : /phosphi(-a)tes, antimoni(-a)tes, arseni(-a)tes
-.a~O3		a~P,Sb,As=5!3_O=-2
+'.a~O3',	'a~P,Sb,As=5!3_O=-2',
 
-.a~O4		a~I,Re=6!7_O=-2
-.a~O4		a~Tc,Ru=5!6!7_O=-2
-.MnO4		Mn=3!4!5!6!7_O=-2
-
+'.a~O4',	'a~I,Re=6!7_O=-2',
+'.a~O4',	'a~Tc,Ru=5!6!7_O=-2',
+'.MnO4',	'Mn=3!4!5!6!7_O=-2',
 # ferrate
-.FeO4		Fe=3!4!6_O=-2
+'.FeO4',	'Fe=3!4!6_O=-2',
 
-.IO[56]		I=7_O=-2
-^I2O4$		I=3;5_O=-2
+'.a~O5',	'a~Fe,Pu=6_O=-2',
+'.ReO5',	'Re=7_O=-2',
 
-.TeO6		Te=6_O=-2
+'.IO[56]',	'I=7_O=-2',
+'^I2O4$',	'I=3;5_O=-2',
 
-.XeO6		Xe=6!8_O=-2
+'.SnO6',	'Sn=4_O=-2',
+'.SbO6',	'Sb=5_O=-2',
+'.a~O6',	'a~Te,Am=6_O=-2',
+# perxenic acid
+'.XeO6',	'Xe=6!8_O=-2',
 
-.MoO3F3		Mo=6_F=-1_O=-2
-
+'.MoO3F3',	'Mo=6_F=-1_O=-2',
+# sulfamic acid salts
+'.NSO3',	'S=6_O=-2_N=-3',
+# thiazates, thionitrites
+'.(?:NSO|SNO|NOS)(?=[\]\)\}]|$)',	'N=3_S=-2_O=-2',
 # sulphites
-.SO3(?=[^OS]|Os|S[bcegimnr]|$)		S=4_O=-2
+'.SO3(?=[^OS]|Os|S[bcegimnr]|$)',	'S=4_O=-2',
 # thiosulphates
-.S2O3		S=6;-2_O=-2
-# pirosulphates
-.S2O7		S=6_O=-2
+'.S2O3',	'S=6;-2_O=-2',
 # peroxydisulfuric (marshal's) acid
-.S2O8		S=6_O=-2;-2;-2;-2;-2;-2;-1;-1
-# bichromates
-.Cr2O7		Cr=6_O=-2
+'.S2O8',	'S=6_O=-2;-2;-2;-2;-2;-2;-1;-1',
+
+'.a~2O7',	'a~P,Re=5_O=-2',
+# pirosulphates, bichromates
+'.a~2O7',	'a~S,Cr=6_O=-2',
 # rhodane
-^\((?:SCN|SNC|CNS|CSN|NSC|NCS)\)2$	S=1_C=2_N=-3
+'^\((?:SCN|SNC|CNS|CSN|NSC|NCS)\)2$',	'S=1_C=2_N=-3',
 # cyan (dicyan)
-^\((?:CN|NC)\)2$	C=4;2_N=-3
+'^\((?:CN|NC)\)2$',	'C=4;2_N=-3',
+# cyanamides
+'.CN2',		'C=4_N=-3',
 # cyanides
-.CN		C=2_N=-3
+'.CN',		'C=2_N=-3',
 # cyanates (salts of cyanic, isocyanic acid)
-.CNO		C=4_N=-3_O=-2
+'.CNO',		'C=4_N=-3_O=-2',
 # fulminates (salts of fulminic acid)
-.ONC		C=-2_N=3_O=-2
+'.ONC',		'C=-2_N=3_O=-2',
 # flaveanic hydrogen
-^C2(?:H2N2S|N2SH2|SH2N2|SN2H2)$	C=2;4_H=1_S=-2_N=-3
+'^C2(?:H2N2S|N2SH2|SH2N2|SN2H2)$',	'C=2;4_H=1_S=-2_N=-3',
 # rubeanic hydrogen
-^C2S2N2H4$	C=2;4_H=1_S=-2_N=-3
-# salts of peroxonitric acid
-.NO4		N=5_O=-1;-1;-2;-2
+'^C2S2N2H4$',	'C=2;4_H=1_S=-2_N=-3',
+# salts of peroxonitric acid or orthonitrates
+'.NO4',		'N=5_O=-1;-1;-2;-2!-2',
 # salts of hyponitrous acid
-.N2O2		N=1_O=-2
+'.N2O2',	'N=1_O=-2',
+
+# salts of азотноватой (триоксодиазотной) acid
+'.N2O3',	'N=2_O=-2',
+
 # salts of nitroxylic acid
-.N2O4		N=2_O=-2
+'.N2O4',	'N=2_O=-2',
 # salts of hydrazonic acid and azides (pernitrides)
-(?:.[\[\(]?N3[\]\)]?|^N3H$)	N=-1;0;0
-^(?:a~3\(N2\)2|a~3N4)$	a~Ca=2_N=-2;-2;-2;0	# ?
+'(?:.[\[\(]?N3[\]\)]?|^N3H$)',	'N=-3;4;-2',
+'^(?:a~3\(N2\)2|a~3N4)$',	'a~Ca=2_N=-2;-2;-2;0',	# OSE ?
 # diimide
-^N2H2$		H=1_N=-2;0
-# ammonia
-NH[34]		H=1_N=-3
+'^N2H2$',	'H=1_N=-2;0',	# OSE ?
+# nitrosyl- group | ion
+'(?:[\[\(]NO[\]\)])',	'N=2!3_O=-2',
+'^a~(?:[\[\(]NO[\]\)])\d*$',	'a~Fe,Ru,Cr=0_N=2_O=-2',
+# ammonia, amide
+'NH[234]',	'H=1_N=-3',
 
-.BF4		B=3_F=-1
-
-.NH2Br		H=1_N=-3_Br=-1
-
-#.P\d+O\d+	P=5_O=-2	# polyphosphates
+'.BF4',		'B=3_F=-1',
+# hypophosphorous
+'.PO2',		'P=1_O=-2',
+# polyphosphates
+'.P2O4',	'P=2_O=-2',
+'.P2O5',	'P=3;3!2;4_O=-2',
+'.P2O6',	'P=4;4!3;5_O=-2',
+'.P3O8',	'P=3;4;4_O=-2',
+'.P6O12',	'P=3_O=-2',
 
 # Neutral ligands
-CO\(NH2\)2		C=4_H=1_N=-3_O=-2
-H2O(?=[^2O]|Os|$)	H=1_O=-2
-C2H4			C=-2_H=1
-
+'CO\(NH2\)2',	'C=4_H=1_N=-3_O=-2',
+'H2O(?=[^2O]|Os|$)',	'H=1_O=-2',
+'C2H4',		'H=1_C=-2',
 # metal ammiakaty
-^a~\(NH3\)\d*$		a~Ca=0_H=1_N=-3
+'^a~\(NH3\)\d*$',	'a~Ca=0_H=1_N=-3',
 
-^(?:HOF|HFO|OFH|FOH)$	H=1_F=1_O=-2
-^Bi2O4$		Bi=3;5_O=-2
-^B4H10$		B=2;2;3;3_H=-1
-^Fe3C$		Fe=2;2;0_C=-4
-^Fe3P$		Fe=3;0;0_P=-3
-^P4S3$		P=1_S=-2;-2;0
-^P4S7$		P=1_S=-2;-2;0;0;0;0;0
-^P4S10$		P=1_S=-2;-2;0;0;0;0;0;0;0;0
-^P12H6$		H=1_P=-3;-3;0;0;0;0;0;0;0;0;0;0
+'^(?:HOF|HFO|OFH|FOH)$',	'H=1_F=1_O=-2',
+
+'^Bi2O4$',	'Bi=3;5_O=-2',
+'^B4H10$',	'B=2;2;3;3_H=-1',
+'^Fe3C$',	'Fe=2;2;0_C=-4',
+'^Fe3P$',	'Fe=3;0;0_P=-3',
+'^P4S3$',	'P=1_S=-2;-2;0',
+'^P4S7$',	'P=1_S=-2;-2;0;0;0;0;0',
+'^P4S10$',	'P=1_S=-2;-2;0;0;0;0;0;0;0;0',
+'^P12H6$',	'H=1_P=-3;-3;0;0;0;0;0;0;0;0;0;0',
 # compound oxide
-^U3O8$		U=5;5;6_O=-2	# triuranium octoxide
-^Pb2O3$		Pb=2;4_O=-2
-^a~3O4$		a~Pb,Pt=2;2;4_O=-2
-^a~3O4$		a~Fe,Co,Mn=2;3;3_O=-2
+'^U3O8$',	'U=5;5;6_O=-2',	# triuranium octoxide
+'^Pb2O3$',	'Pb=2;4_O=-2',
+'^Sb2O4$',	'Sb=3;5_O=-2',
+'^a~3O4$',	'a~Pb,Pt=2;2;4_O=-2',
+'^a~3O4$',	'a~Fe,Co,Mn=2;3;3_O=-2',
 # carbonyls
-^a~\d*\(CO\)\d*$	a~V,W,Cr,Ir,Mn,Fe,Co,Ni,Mo,Tc,Re,Ru,Rh,Os=0_C=2_O=-2
+'^a~\d*\(CO\)\d*$',	'a~V,W,Cr,Ir,Mn,Fe,Co,Ni,Mo,Tc,Re,Ru,Rh,Os=0_C=2_O=-2',
 # alkaline metals and others
-^a~2O2			a~H,Li,Na,K,Rb,Cs,Fr,Hg=1_O=-1	# peroxides
-^(?:a~O2|a~2O4)		a~Li,Na,K,Rb,Cs,Fr=1_O=-1;0	# superoxides
-^a~O3			a~Li,Na,K,Rb,Cs,Fr=1_O=-1;0;0	# ozonide
+'^a~2O2',	'a~H,Li,Na,K,Rb,Cs,Fr,Hg=1_O=-1',	# peroxides
+'^(?:a~O2|a~2O4)',	'a~Li,Na,K,Rb,Cs,Fr=1_O=-1;0',	# superoxides
+'^a~O3',	'a~Li,Na,K,Rb,Cs,Fr=1_O=-1;0;0',	# ozonide
 # alkaline-earth metals and others
-^a~O2			a~Mg,Ca,Sr,Ba,Ra,Zn,Cd,Hg,Cu=2_O=-1	# peroxides
-^(?:a~\(O2\)2|a~O4)	a~Mg,Ca,Sr,Ba,Ra=2_O=-1;0	# superoxides
-^(?:a~\(O3\)2|a~O6)	a~Mg,Ca,Sr,Ba,Ra=2_O=-1;0;0	# ozonide
+'^a~O2',	'a~Mg,Ca,Sr,Ba,Ra,Zn,Cd,Hg,Cu=2_O=-1',	# peroxides
+'^(?:a~\(O2\)2|a~O4)',		'a~Mg,Ca,Sr,Ba,Ra=2_O=-1;0',	# superoxides
+'^(?:a~\(O3\)2|a~O6)',		'a~Mg,Ca,Sr,Ba,Ra=2_O=-1;0;0',	# ozonide
 # all peroxides
-.\(O2\)			O=-1
+'.\(O2\)',	'O=-1',
 # dioxygenils, O2PtF6 ... (except O2F2)
-^(?:\(O2\)|O2)(?![F])	O=1;0
+'^(?:\(O2\)|O2)(?![F])',	'O=1;0',
 # chromium peroxide
-^CrO5$		Cr=6_O=-2;-1;-1;-1;-1
+'^CrO5$',	'Cr=6_O=-2;-1;-1;-1;-1',
+# rhenium, iodine, chlorine peroxide
+'^a~2O8$',	'a~Re,I,Cl=7_O=-2;-2;-2;-2;-2;-2;-1;-1',
 # sulfur peroxide
-^SO4$		S=6_O=-2;-2;-1;-1
-^S2O7$		S=6_O=-2;-2;-2;-2;-2;-1;-1
+'^SO4$',	'S=6_O=-2;-2;-1;-1',
+'^S2O7$',	'S=6_O=-2;-2;-2;-2;-2;-1;-1',
 # peroxymonosulfuric | persulfuric | Caro's acid
-.SO5		S=6_O=-2;-2;-2;-1;-1
+'.SO5',		'S=6_O=-2;-2;-2;-1;-1',
 # per-carbonates (percarbonic acid)
-.C2O6		C=4_O=-2;-2;-2;-2;-1;-1
+'.C2O6',	'C=4_O=-2;-2;-2;-2;-1;-1',
 # acid chlorine peroxide ?
-.ClO5		Cl=7_O=-2;-2;-2;-1;-1
+'.ClO5',	'Cl=7_O=-2;-2;-2;-1;-1',
+# dioxodifluorochlorate
+'.ClO2F2',	'Cl=5_O=-2_F=-1',
+# oxotetrafluorochlorate
+'.ClOF4',	'Cl=5_O=-2_F=-1',
+# oxofluorides
+'.ClO3F2',	'Cl=7_O=-2_F=-1',
+'.ClO2F4',	'Cl=7_O=-2_F=-1',
 
-^Cl2O8$		Cl=7_O=-2;-2;-2;-2;-2;-2;-1;-1
-^I2O8$		I=7_O=-2;-2;-2;-2;-2;-2;-1;-1
+'^Fe2P',	'P=5_Fe=-2;-3',
 # platinum hexafluoride (strongest oxidizer)
-.PtF[6-9]$		Pt=5_F=-1
-__IONS_END__
+'.PtF[6-9]$',	'Pt=5_F=-1',
+# chlorine nitrides
+'^(?:Cl3N|NCl3)$',	'Cl=1_N=-3',
+'.(?:ClN|NCl)',		'Cl=1_N=-3',
+# exotic
+'^FNO3$',	'F=1_N=5_O=-2',
+	]
+}
+
 
 1;
 __END__
@@ -1439,7 +1504,7 @@ If you doesn't know formulas of chemical elements and/or Periodic Table
 use subroutine C<good_formula()>.
 I insist to do it always anyway :)
 
-Now C<oxidation_state()> is checked over 6200 unique inorganic substances.
+Now C<oxidation_state()> is checked for over 6500 unique inorganic substances.
 
 
 =head2 parse_chem_mix( $mix_of_substances [, \%coefficients ] )
@@ -1706,7 +1771,7 @@ in the range 0..2^32-1, i.e. 0..4,294,967,295.
 The nature is diversiform, but we search simple decisions :)
 
 The C<class_cir_brutto()> protesting CLASS-CIR
-over 22,100 unique inorganic reactions.
+for over 23,300 unique inorganic reactions.
 Yes, to me it was hard to make it.
 
 
@@ -1714,7 +1779,7 @@ Yes, to me it was hard to make it.
 
 This subroutine calculates Tactico-Technical characteristics (TTC)
 of reaction C<\@reactants_and_products>, sorry military slang :),
-i.e. quantity SAR: (s)ubstance, (a)toms and (r)ank of reaction.
+i.e. quantity SAR: (s)ubstances, (a)toms and (r)ank of reaction.
 Proceeding example above:
 
   print Dumper ttc_reaction( $ce );
@@ -1754,14 +1819,14 @@ and the tag C<all> exports them all:
 =head1 DEPENDENCIES
 
 Chemistry::Harmonia is known to run under perl 5.8.8 on Linux.
-The distribution uses L<Chemistry::File::Formula>,
+The distribution uses
+L<Chemistry::File::Formula>,
 L<Algorithm::Combinatorics>,
 L<Regexp::Common>,
 L<Math::BigInt>,
 L<Math::BigRat>,
 L<Math::Assistant>,
-L<String::CRC::Cksum>,
-L<Inline::Files>
+L<String::CRC::Cksum>
 and L<Carp>.
 
 
@@ -1779,11 +1844,11 @@ L<Chemistry::MolecularMass>.
 
 =head1 AUTHOR
 
-Alessandro Gorohovski, E<lt>angel@feht.dgtu.donetsk.uaE<gt>
+Alessandro Gorohovski, E<lt>angel@domashka.kiev.uaE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2011 by A. N. Gorohovski
+Copyright (C) 2010-2011 by A. N. Gorohovski
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.8.8 or,

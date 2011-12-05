@@ -57,6 +57,10 @@ exit;
 # BD for test oxidation_state()
 sub datest{
     return {
+	'Na4[Fe(CN)5(NOS)]' =>	'Na=1_Fe=2_C=2_N=-3_N=3_S=-2_O=-2',
+	'H3NSO3' =>	'H=1_S=6_O=-2_N=-3',
+	'(NH4)2SnCl6' =>	'H=1_Sn=4_N=-3_Cl=-1',
+	'(NH4)6Mo7O24' =>	'H=1_Mo=6_N=-3_O=-2',
 	'H3PO3' =>	'H=1_P=3_O=-2',
 	'HSbO3' =>	'H=1_Sb=5_O=-2',
 	'BaPtO3' =>	'Ba=2_Pt=4_O=-2',
@@ -99,7 +103,7 @@ sub datest{
 	'C2N2' =>	'C=3_N=-3',
 	'[Mn(N3)4]OH' => 'Mn=5_H=1_O=-2_N=-1;0;0',
 	'K2Cd(N3)4' => 'K=1_Cd=2_N=-1;0;0',
-	'NCl3' =>	'N=3_Cl=-1',
+	'NCl3' =>	'N=-3_Cl=1',
 	'TeH2' =>	'H=1_Te=-2',
 	'WTe2' =>	'W=4_Te=-2',
 	'BP' =>		'B=3_P=-3',
@@ -206,5 +210,12 @@ sub datest{
 	'[Pt(NH3)4][PtCl4]' => 'Pt=2_Pt=2_N=-3_H=1_Cl=-1',
 	'PtPtCl6' => 'Pt=2_Pt=4_Cl=-1',
 	'{FeO}2{SiO2}' => 'Fe=2_Si=4_O=-2_O=-2',
+	'NOCl' => 'N=3_O=-2_Cl=-1',
+	'K2[Fe(NO)(CN)5]' => 'K=1_Fe=3_C=2_N=2_N=-3_O=-2',
+	'Cu[Fe(NO)(CN)5]' => 'Cu=2_Fe=3_N=2_O=-2_C=2_N=-3',
+	'Fe(NO)4' => 'Fe=0_N=2_O=-2',
+	'HSO3(NH2)' => 'H=1_H=1_S=6_O=-2_N=-3',
+	'HPO2(NH2)2' => 'H=1_H=1_P=5_O=-2_N=-3',
+	'[NO]ClO4' => 'Cl=7_N=3_O=-2_O=-2',
     }
 }

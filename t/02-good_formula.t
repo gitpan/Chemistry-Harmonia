@@ -15,8 +15,11 @@ for my $abracadabra ( keys %$dt ){
 		[ sort @{ $dt->{$abracadabra} }], "good formula test '$abracadabra'" );
 }
 
-
-$dt = { 'h20' => [ 'H20', 'H2O' ] };
+$dt = { 'h20' => [ 'H20', 'H2O' ],
+	'a120' => [ 'Al20', 'Al2O' ],
+	'a1203' => [ 'Al203', 'Al2O3' ],
+	'Si204' => [ 'Si204', 'SI204', 'Si2O4', 'SI2O4' ],
+	};
 
 for my $abracadabra ( keys %$dt ){
     is_deeply( [ sort @{ good_formula( $abracadabra, { 'zero2oxi' => 1 } ) } ],
@@ -27,6 +30,22 @@ exit;
 
 sub datest{
     return {
+	'ALCL3' => [ 'AlCl3' ],
+	'Si204' => [ 'Si204', 'SI204' ],
+	'o$' => [ 'Os', 'OS' ],
+	'qsQsQ' =>  [ 'SOsO', 'SOSO' ],
+	'aqhqmqrqsq' => [ 'AgHgMgRgSg' ],
+	'a1203' => [ 'Al203' ],
+	'1' => [ 'I' ],
+	't|' => [ 'Tl' ],
+	'l1' => [ 'Li' ],
+	'b!' => [ 'BI', 'Bi' ],
+	'!2' => [ 'I2' ],
+	'|2' => [ 'I2' ],
+	'12' => [ 'I2' ],
+	'102' => [ 'IO2' ],
+	'a1' => [ 'Al' ],
+	'c1' => [ 'Cl' ],
 	'Co' => [ 'Co' ],
 	'Cc' => [ 'CC' ],
 	'co' => [ 'CO','Co' ],

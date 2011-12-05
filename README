@@ -1,4 +1,4 @@
-Chemistry-Harmonia version 0.0777
+Chemistry-Harmonia version 0.08
 ===============================
 
 The module provides the necessary subroutines to solve some puzzles of the
@@ -31,7 +31,6 @@ Math::BigInt
 Math::BigRat
 Math::Assistant
 String::CRC::Cksum
-Inline::Files
 Test::More
 Test::LongString
 Test::Pod
@@ -39,7 +38,7 @@ Carp
 
 COPYRIGHT AND LICENCE
 
-Copyright (C) 2011 by Alessandro Gorohovski
+Copyright (C) 2010-2011 by Alessandro Gorohovski
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.8.8 or,

@@ -1,9 +1,9 @@
 --- #YAML:1.0
 name:               Chemistry-Harmonia
-version:            0.0777
+version:            0.08
 abstract:           Decision of simple and difficult chemical puzzles.
 author:
-    - Alessandro Gorohovski <angel@feht.dgtu.donetsk.ua>
+    - Alessandro Gorohovski <angel@domashka.kiev.ua>
 license:            unknown
 distribution_type:  module
 configure_requires:
@@ -14,9 +14,8 @@ requires:
     Algorithm::Combinatorics:  0.26
     Carp:                 0
     Chemistry::File::Formula:  0.37
-    Inline::Files:        0.64
     Math::Assistant:      0.04
-    Math::BigInt:         1.993
+    Math::BigInt:         1.997
     Math::BigRat:         0.2602
     Regexp::Common:       2011041701
     String::CRC::Cksum:   0.91

@@ -1,5 +1,17 @@
 Revision history for Perl extension Chemistry::Harmonia.
 
+0.8  Mon Dec  5 11:11:11 2011
+	- In 'oxidation_state':
+		high-speed optimization in 2 times
+		algorithm of OSE recognition is refined;
+	- Correction and optimization of 'good_formula':
+		1, !, | -> l/I/i for I, Al, Cl, Tl, Li, Bi, Ni, Si
+		Aq, Hq, Mq, Rq, Sq -> Ag, Hg, Mg, Rg, Sg;
+		Q -> O
+		$ -> s
+	- And many others optimizations;
+	- New tests are added.
+
 0.0777  Wed Jun 15 22:22:22 2011
 	- add to Makefile.PL modules Test::LongString & Test::Pod
 
