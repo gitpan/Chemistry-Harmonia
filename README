@@ -1,4 +1,4 @@
-Chemistry-Harmonia version 0.08
+Chemistry-Harmonia version 0.11
 ===============================
 
 The module provides the necessary subroutines to solve some puzzles of the
@@ -26,7 +26,6 @@ This module requires these other modules and libraries:
 
 Chemistry::File::Formula
 Algorithm::Combinatorics
-Regexp::Common
 Math::BigInt
 Math::BigRat
 Math::Assistant
@@ -34,11 +33,13 @@ String::CRC::Cksum
 Test::More
 Test::LongString
 Test::Pod
+Data::Dumper
 Carp
+
 
 COPYRIGHT AND LICENCE
 
-Copyright (C) 2010-2011 by Alessandro Gorohovski
+Copyright (C) 2010-2013 by Alessandro Gorohovski
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.8.8 or,

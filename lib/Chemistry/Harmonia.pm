@@ -11,7 +11,6 @@ use String::CRC::Cksum qw( cksum );
 use Math::BigInt qw( blcm bgcd );
 use Math::BigRat;
 use Math::Assistant qw(:algebra);
-use Regexp::Common;
 
 use Data::Dumper;
 
@@ -24,20 +23,26 @@ our %EXPORT_TAGS = ( 'all' => [ qw(
 			parse_chem_mix
 			prepare_mix
 			oxidation_state
+			redox_test
 			class_cir_brutto
 			good_formula
+			brutto_formula
+			stoichiometry
 			ttc_reaction
 			) ],
 		    'redox' => [ qw(
 			parse_chem_mix
 			prepare_mix
 			oxidation_state
+			redox_test
 			) ],
 		    'equation' => [ qw(
 			parse_chem_mix
 			prepare_mix
 			class_cir_brutto
 			good_formula
+			brutto_formula
+			stoichiometry
 			ttc_reaction
 			) ],
 );
@@ -46,7 +51,7 @@ our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
 
 our @EXPORT = qw( );
 
-our $VERSION = '0.08';
+our $VERSION = '0.11';
 
 use base qw(Exporter);
 
@@ -68,7 +73,9 @@ sub good_formula{
 	s/((?:^|[^BCGLNPRT])A)$m/$1l/ig;	# for 'Al'
 	s/((?:^|[^ACT])L)$m/$1i/ig;	# for 'Li'
 
-	1 while s/(?<!\d)0(?![,.]\d)/o/g; # Is it oxigen?
+	# Is it 'o' or oxigen?
+	1 while s/(?<=[CHNP])0(?![,.]\d)/\$/g; # temporarilly to replace --> '$'
+	1 while s/(?<!\d)0(?![,.]\d)/o/g; # to replace --> 'o'
 
 	s/(?<=[ACT])$m(?=\D|$)/l/ig;	# for Al, Cl, Tl
 	s/(?<=[BLNS])$m(?=\D|$)/i/ig;	# for Bi, Li, Ni, Si (without Ti)
@@ -83,7 +90,7 @@ sub good_formula{
     my $adb = &_atoms_db;
 
     # Possible atoms of substance
-    for( my $i = 0; $i < @$adb; $i+=4 ){
+    for( my $i = 0; $i < @$adb; $i+=5 ){
 	$_ = $adb->[$i];
 
 	next if $substance !~ /$_/i;
@@ -97,31 +104,38 @@ sub good_formula{
 	$sa{ uc $_ } = '' for split //; # String of CAPITAL letters
     }
 
-    # All atom letters (CAPITAL)
+    # All atom letters (CAPITAL) || return 0
     my $sas = join('', keys %sa) || return;
 
-    my $mz = '(?<!1)0';	# mask for 'zero2oxi'
+    my $mz = '(?<!1)0';		# mask for 'zero2oxi'
 
     for( $substance ){
 	s/,/./g;
-	s/[^0-9\.\*\(\)\[\]\{\}$sas]+//ig; # to clean bad symbols
-	s/(?<!\d)\.+(?!\d)//g;	# to clean points
+	s/[^0-9\$\.\*\(\)\[\]\{\}$sas]+//ig; # to clean bad symbols
 
-	# clean sequences not unary symbols
+	s/\.+$//;	# to clean points
+	s/(?<!\d)\.+(?!\d)//g;	# the same
+
+	# to clean sequences not unary symbols
 	while( @maU && $sas =~ /([^@maU])/gx ){
 	    my $ul = $1;
 	    s/($ul)$ul+($ul)/$1$2/ig;
 	}
 
 	# remove bordering brackets
-	s/^.|.$//g while /($RE{balanced}{-parens=>'(){}[]'})/g && $_ eq $1;
+	our( $maskr, $maskf, $maskq );
+	$maskr = qr/\((?:(?>[^\(\)]+)|(??{$maskr}))*\)/;
+	$maskf = qr/{(?:(?>[^{}]+)|(??{$maskf}))*}/;
+	$maskq = qr/\[(?:(?>[^\[\]]+)|(??{$maskq}))*\]/;
 
-	# do small the last symbol of double
+	s/^.|.$//g while /($maskr|$maskf|$maskq)/g && $_ eq $1;
+
+	# to do small the last symbol of double
 	s/([AEGLMR])(?=[^a-z]|$)/\l$1/g;
 
 	# Double symbol similar unary with coefficient in the end
 	if( /^@maUl\d+$/i && @maU && /^(?i:[@maU])\L[@maU]\d+$/ ){
-	    my @cf = ("\u$_", uc);
+	    my @cf = ( "\u$_", uc );
 
 	    if( /$mz/ && exists( $opts->{'zero2oxi'} ) ){
 		my @a = @cf;
@@ -170,21 +184,21 @@ sub good_formula{
     }
 
     my $cf = [''];
-    for my $s (split /((?:\d|\(|\)|\[|\]|\{|\})+)/,$substance){
+    for my $s (split /((?:\$|\d|\(|\)|\[|\]|\{|\})+)/,$substance){
 
 	if( $s =~ /[$sas]/i ){ # Atom symbols
 	    &_in_gf($s, \@maU, \@maUl, $cf);
-	
+
+	}elsif( $s =~ /\$/ ){ # Zero symbols: 'o' && 'O'
+	    $s =~ s/^\$//;
+	    &_add_zero( $cf, "O$s", "o$s" ); # add oxigen to { C H N P } -> { CO HO NO PO }
+					 # add 'o' to { C H N P } -> { Co Ho No Po }
+
 	}elsif($s =~ /$mz/ && exists( $opts->{'zero2oxi'} ) ){ # Zero symbols
-
-	    my $z = $s;
+	    my $z = $s;		# zero
 	    $s =~ s/$mz/O/g;	# oxigen
-	    my $n = $#{$cf};
 
-	    for( my $i = 0; $i <= $n; $i++ ){
-		$cf->[$i + $n + 1] = $cf->[$i].$s;	# oxigen
-		$cf->[$i] .= $z;	# zero
-	    }
+	    &_add_zero( $cf, $s, $z );
 
 	}else{ # Others
 	    $_ .= $s for @$cf;
@@ -194,6 +208,15 @@ sub good_formula{
     $cf->[0] =~ /\w/ ? return $cf : return;
 }
 
+sub _add_zero{
+    my( $cf, $oxi, $z ) = @_;
+    my $n = $#{$cf};
+
+    for( my $i = 0; $i <= $n; $i++ ){
+	$cf->[$i + $n + 1] = $cf->[$i].$oxi;	# add oxigen to { C H N P } -> { CO HO NO PO }
+	$cf->[$i] .= $z;	# add 'o' to { C H N P } -> { Co Ho No Po }
+    }
+}
 
 sub _in_gf{
     my($s, $maU, $maUl, $cf) = @_;
@@ -478,6 +501,527 @@ sub prepare_mix{
 }
 
 
+# Расчёт (поиск) стехиометрических коэффициентов
+# Возвращает :
+#	решение в $cheq
+#	undef --- нет решения
+sub stoichiometry{
+    my($mix, $opts) = @_;
+    $opts->{'redox_pairs'} = 1 unless exists $opts->{'redox_pairs'};	# вкл. redox-уравниватель
+
+    my @cheq; # возвращаемые уравнения
+
+    &_in_search_stoich($mix, \@cheq, $opts ); # Рекурсивный поиск
+
+    @cheq ? \@cheq : return undef;
+}
+
+
+# Рекурсивный поиск стехиометрических коэффициентов
+sub _in_search_stoich{
+    my($mix, $cheq, $opts) = @_;
+
+    my %coef; # на случай заданных коэф. в $mix
+    my $chem_eq = parse_chem_mix($mix, \%coef);
+
+    croak('Bad equation!') if @$chem_eq != 2;
+
+    # Хеш Атомной матрицы и кол-во атомов
+    my ( $atoms_substance, $num_atoms ) = &_search_atoms_subs( $chem_eq );
+
+    # Список Всех веществ и копия атомной матрицы (для проверки баланса в конце)
+    my $All_substances = [ keys %$atoms_substance ];
+    my $ini_am = { map{ $_, [ @{ $atoms_substance->{$_} } ] } @$All_substances };
+
+    my $R_free = [ (0) x $num_atoms ]; # R-вектор свободных членов (правая часть)
+    my $R_zero = 1; # Признак нулевого R-вектора
+
+    while( my($s, $c) = each %coef ){ # В-во и стех.коэф.
+	$opts->{'coefficients'}{$s} = $c unless exists( $opts->{'coefficients'}{$s} );
+    }
+
+    # Если заданы стех.коэффициенты
+    if( exists $opts->{'coefficients'} && keys %{ $opts->{'coefficients'} } ){
+
+	my $sign = 1; # знак переноса вправо по исходным в-вам
+
+	for my $ip ( @$chem_eq ){
+	    for my $s ( @$ip ){
+
+		if( exists $opts->{'coefficients'}{$s} ){
+
+		    # устанавливаем знак-признак исх./продукт
+		    $opts->{'coefficients'}{$s} = $sign * abs( $opts->{'coefficients'}{$s} );
+
+		    my $i;
+		    # формируем Вектор правой части СЛАУ
+		    $R_free->[$i++] -= $_ * $opts->{'coefficients'}{$s}
+						for @{ $atoms_substance->{$s} };
+		    # удаляем вещество после переноса вправо
+		    delete $atoms_substance->{$s};
+		}
+	    }
+	    $sign = -1; # знак переноса вправо по продуктам
+	}
+
+	# Поиск полностью нулевых атомных строк
+	my @sum_atom = (0) x $num_atoms;
+	for my $s ( keys %{ $atoms_substance} ) {
+	    my $i;
+	    $sum_atom[$i++] += $_ for @{ $atoms_substance->{$s} };
+	}
+
+	my @atom_del; # удаляемые 0-строки
+	for( my $i = $#sum_atom; $i >= 0; $i--){ # Обратный отсчёт
+
+	    unless( $sum_atom[$i] ){ # Все атомы нули
+		return if $R_free->[$i]; # Нет баланса, нет решения
+		push @atom_del, $i;
+	    }
+
+	    $R_zero = 0 if $R_free->[$i]; # R-вектор не 0
+	}
+
+	# Удаление 0-х атомных строк
+	for my $i ( @atom_del ){
+	    splice @$R_free, $i, 1;
+
+	    for( values %{ $atoms_substance} ) {
+		splice @{ $_ }, $i, 1;
+	    }
+	}
+
+	# Уменьшаем число атомов
+	unless( $num_atoms -= @atom_del ){
+
+	    # Заданы все правильные стех.коэф.
+	    push @$cheq, prepare_mix( $chem_eq, 
+		{ 'norma' => 1, 'coefficients' => $opts->{'coefficients'} } );
+	    return;
+	}
+
+	# Одно в-во без стех.коэф.
+	if( (my @v = values %$atoms_substance) == 1 ){
+
+	    # Должна быть пропорция между атомами в в-ве и правом векторе
+	    for( my $i = 0; $i < $#{ $v[0] }; $i++){
+		return if $v[0]->[$i] * $R_free->[$i+1] != $v[0]->[$i+1] * $R_free->[$i]
+	    }
+	}
+    }
+
+    # Список искомых веществ
+    my $substances_X = [ keys %$atoms_substance ];
+
+    return if @$substances_X < 2 && $R_zero; # 0|1 вещество и не заданы коэф.
+
+    # Ранг матрицы --- кол-ва независимых строк, столбцов
+    my $order = Rank( [ values %$atoms_substance ] );
+
+#    print "$mix\n";
+#    print "Atoms = $num_atoms
+#Substances = ",scalar(keys %$atoms_substance),
+#"\nRank = $order\n--------\n";
+
+    # не задан R-вектор (коэффициенты) и ранг == веществам
+    return if $R_zero && $order == @$substances_X; # нет решения
+
+    if( @$substances_X - $order > 1 ){	# Веществ больше Ранга на 2 и более 
+
+	# Ограничить рекурсию самым Верхним!!! уровнем перебора
+	return if @$cheq; # || @$substances_X < 3;
+
+	if( $opts->{'redox_pairs'} && ( my $redox = &redox_test($chem_eq) ) ){
+	    # Проверить реакцию на ОВР
+#	if( my $redox = &redox_test($chem_eq) ){ # Это ОВР
+
+	    my @nm_rx = sort keys %$redox; # 0='oxidant' и 1='reducer'
+	    my %pairs;
+
+	    for my $nm ( @nm_rx ){
+		for my $e ( keys %{ $redox->{$nm} } ){ # Элементы
+		    # Исходное->Конечное состояние элемента
+		    for my $i_k ( keys %{ $redox->{$nm}{$e} } ){
+			push @{ $pairs{$nm} }, $i_k;
+		    }
+		}
+	    }
+
+# print Dumper \%pairs;
+
+	    my $iter_oxi = subsets( $pairs{ $nm_rx[0] }); # можно задать ,1 - один окислитель
+
+	    while(my $pair_oxi = $iter_oxi->next){ # Набор пар
+		next unless @$pair_oxi; # убрать пустые (фича subsets)
+
+		my $sum_oxi_e = 0; # сумма e- нов принимаемых окислителями
+
+		for my $e ( keys %{ $redox->{ $nm_rx[0] } } ){ # Элементы окислителя
+		    for my $i_k ( @{ $pair_oxi } ){
+			$sum_oxi_e += $redox->{ $nm_rx[0] }{$e}{$i_k}[0] if exists( $redox->{ $nm_rx[0] }{$e}{$i_k} );
+		    }
+		}
+
+		# 1 - один восстановитель (надо настраивать!!!)
+		my $iter_red = subsets( $pairs{ $nm_rx[1] } );
+
+		while(my $pair_red = $iter_red->next){ # Набор пар
+		    next if $sum_oxi_e < @{ $pair_red }; # принимаемых e- нов меньше восст-лей
+
+		    my $sum_red_e = 0; # сумма e- нов отдаваемых восстановителями
+
+		    for my $e ( keys %{ $redox->{ $nm_rx[1] } } ){ # Элементы восстановителя
+			for my $i_k ( @{ $pair_red } ){
+			    $sum_red_e += $redox->{ $nm_rx[1] }{$e}{$i_k}[0] if exists( $redox->{ $nm_rx[1] }{$e}{$i_k} );
+			}
+		    }
+
+		    next if $sum_red_e < @{ $pair_oxi }; # отдаваемых e- нов меньше окисл-ей
+
+		    # Формируем вектор правых частей
+
+		    # из окислителей
+		    my $oxi_in = variations_with_repetition( [ (1..($sum_red_e - @{ $pair_oxi } + 1) ) ],
+						scalar(@{ $pair_oxi }) );
+		    while (my $e_oxi = $oxi_in->next) {
+
+			# Все e-ны должны быть распределены по окислителям
+			my $sum_e = 0;
+			$sum_e += $_ for @$e_oxi;
+			next if $sum_e != $sum_red_e;
+
+			# из восстановителей
+			my $red_in = variations_with_repetition( [ (1..($sum_oxi_e - @{ $pair_red } + 1) ) ],
+						scalar(@{ $pair_red }) );
+			while (my $e_red = $red_in->next) {
+
+			    # Все e-ны должны быть распределены по восстановителям
+			    my $sum_e = 0;
+			    $sum_e += $_ for @$e_red;
+			    next if $sum_e != $sum_oxi_e;
+
+			    # Копируем во временный хеш опций
+			    my %in_opts;
+			    $in_opts{'redox_pairs'} = $opts->{'redox_pairs'};
+			    $in_opts{'coefficients'}{ $_ } = $opts->{'coefficients'}{ $_ } for keys %{ $opts->{'coefficients'} };
+
+			    # Доформировываем внутренний хеш опций для R-вектора
+			    my $j = 0;
+			    for my $i_k ( @{ $pair_oxi } ){ # пары для окислителей
+				for( split "->",$i_k ){ # Получаем Исходное и конечное
+				    unless( exists( $opts->{'coefficients'}{$_} ) ){
+					$in_opts{'coefficients'}{$_} += $e_oxi->[$j];
+				    }
+# last;
+				}
+				$j++;
+			    }
+			    $j = 0;
+			    for my $i_k ( @$pair_red ){ # пары для восстановителей
+				for( split "->",$i_k ){
+				    unless( exists( $opts->{'coefficients'}{$_} ) ){
+					$in_opts{'coefficients'}{$_} += $e_red->[$j];
+				    }
+				}
+				$j++;
+			    }
+
+			    eval{ &_in_search_stoich($mix, $cheq, \%in_opts) };
+			}
+		    }
+		}
+	    }
+	}
+
+	# Ordinary no-ОВР reactions
+
+	my $iter = subsets($All_substances);
+	$iter->next; # to discard 1st full substances list
+
+	while(my $ys = $iter->next){ # Substances list
+	    next if @$ys < 2; # it isn't enough substances for a variation (not last!)
+
+	    my $new_mix = prepare_mix( $chem_eq, { 'substances' => $ys } ) || next;
+
+	    eval{ &_in_search_stoich($new_mix, $cheq, $opts) }; # recursion
+	}
+	return;
+    }
+
+    my $base_subst = [ @$substances_X ]; # Base substances list
+    my $var_subst; # Varied substance
+
+    # R-vector не задан (0) или задан (1) and matrix недоопределённая
+    if( $R_zero || ( $R_zero == 0 && @$substances_X == $order + 1 ) ){
+
+	# Search linear-dependent substance (column)
+	for( 1..$#{ $substances_X } ){
+	    $var_subst = pop @$base_subst; # взять последнее
+	    last if Rank( [ ( map $atoms_substance->{$_}, @$base_subst ) ] ) == $order;
+	    unshift @$base_subst, $var_subst; # add в начало
+	}
+
+#	return if @$base_subst == @$substances_X; # no found (?)
+
+	my $i;
+	# доформировываем R-vector
+	$R_free->[$i++] -= $_ for @{ $atoms_substance->{$var_subst} };
+    }
+
+    # Переопределённая матрица (atoms >= substances > rank)
+    my $ao = $num_atoms - $order;
+    if( $ao > 0 ){
+
+	# Copy vector & atom matrix
+	my $R_copy = [ @$R_free ];
+	my $cam = { map{ $_, [ @{ $atoms_substance->{$_} } ] } keys %$atoms_substance };
+
+	my $it = subsets( [ ( 0..$num_atoms - 1 ) ], $ao );
+	while( my $p = $it->next ){
+
+	    # Удаление атомных строк (от старших)
+	    for my $i ( reverse @$p ){
+		splice @$R_free, $i, 1; # из вектора
+		splice @{ $_ }, $i, 1 for values %$atoms_substance; # из атомной матрицы
+	    }
+
+	    # All linear-dependent atom rows removed
+	    last if Rank( [ map $atoms_substance->{$_}, @$base_subst ] ) == $order;
+
+	    # Recovery and search repetition
+	    $R_free = [ @$R_copy ]; # vector
+	    $atoms_substance = { map{ $_, [ @{ $cam->{$_} } ] } keys %$cam }; # matrix
+
+	}
+#	$num_atoms -= $ao; # уменьшаем число атомов
+    }
+
+    # Находим решение
+    # Формируем атомную матрицу,
+    my $steX = Solve_Det(
+	[ map $atoms_substance->{$_}, @$base_subst ],
+	$R_free,
+	{ 'eqs' => 'column', 'int' => 1 } )
+    or
+    croak("No solver!"); # Нет решения
+
+    # Решение НАЙДЕНО!
+    my @den; # Знаменатели
+    for( @$steX ){
+	my($n, $d) = Math::BigRat->new("$_")->parts();
+	$_ = $n;	# числитель
+
+	push @den, $d || 1;
+    }
+
+    # lowest common multiplicator
+    my $lcm = blcm(@den);
+
+    my %cfs; # Стех. коэффициенты
+    $cfs{$var_subst} = $lcm if defined $var_subst; # варьируемого в-ва
+
+    unless( $R_zero ){ # Некоторые в-ва заданы
+	while( my($s, $c) = each %{ $opts->{'coefficients'} } ){
+	    $cfs{$s} = $lcm * $c;
+	}
+    }
+
+    my $i = 0;
+    for( @$base_subst ){ # Искомые
+	$cfs{$_} = $steX->[$i] * $lcm / $den[$i];
+	$i++;
+    }
+
+    if( $ao > 0 ){ # Для переопределённых - Проверка мат.баланса
+
+	my @balance;
+	for my $s (keys %cfs){ # в-во
+	    my $i = 0;
+
+	    $balance[ $i++ ] += $_ * $cfs{$s}->numify()  for @{ $ini_am->{$s} };
+	}
+
+	return if scalar(grep $_, @balance); # no balance
+    }
+
+    # С помощью НОД (GCD) уменьшаем порядок стех.коэф.
+    if( ( my $gcd = bgcd(values %cfs) ) > 1 ){
+	$cfs{$_} /= $gcd for keys %cfs;
+    }
+
+    my $keq = prepare_mix( $chem_eq, { 'norma' => 1, 'coefficients' => \%cfs } );
+
+    # Save only unique chemical equation
+    scalar(grep $_ eq $keq, @$cheq) || push @$cheq, $keq;
+}
+
+
+# Возвращает массив хешей:
+# $redox{oxidant/reducer}{Элементы}{исх.->прод.}
+#				[0] - число e- нов принимаемых/отдаваемых
+#				[1] - OS элемента в исходном
+#				[2] -		... в продукте
+#				[3] - число атомов элемента в исходном
+#				[4] -		... в продукте
+#				[5] - множитель на MAX число атомов исх.
+#				[6] -		... продукта
+
+# $el_half_eqs{oxidant/reducer}[..] - 2 массива полуреакций (в проекте для другой п/п)
+
+sub redox_test{
+    my $chem_eq = shift;
+
+    my @rx;	# $rx[исх/прод] {элементы} {OS элемента} {вещества} =  Кол-во атомов элемента
+    my %ve;	# $ve{в-во} = количество элементов
+
+    my $z = 0;	# Признак исх.в-в
+    for my $eq (@{ $chem_eq }){
+	for my $s (@{ $eq }){
+
+	    my $os = oxidation_state($s);
+	    # Рез-ты: $os->{элемент}
+			# {num}[0 .. n-1] - кол-во по каждому 1..n атому элемента
+			# {OS}[0 .. n-1][ ] - степень(и) окисления (OS) 1..n атому элемента
+
+	    $ve{$s} = keys %$os;	# кол-во Элементов
+
+	    for my $e ( keys %{$os} ){	# Элемент
+
+		# Берём OS атомов элемента в в-ве
+		for ( my $i=0; $i<=$#{ $os->{$e}{'OS'} }; $i++ ){
+		    
+# !!! Продумать дробные степени окисления (сделано)
+		    # Объединяем множественные OS
+		    my($a, $sum, $n);
+		    for( @{ $os->{$e}{'OS'}[$i] } ){
+			$sum += $_;
+			$n++;	# кол-во
+		    }
+		    
+		    if($n > 1){
+			my $gcd = bgcd(abs($sum), $n); # НОД
+			if($gcd > 1){
+			    $sum /= $gcd;
+			    $n /= $gcd;
+			}
+			$a = "$sum/$n";
+
+		    }else{
+			$a = $sum;
+		    }
+		    # Кол-во атомов элемента
+		    $rx[$z]{$e}{$a}{$s} = $os->{$e}{'num'}[$i]; 
+		}
+	    }
+	}
+	$z = 1;	# продукты
+    }
+
+_M_redox_1:
+    for my $e ( keys %{ $rx[0] } ){	# Элементы (берём из исходных)
+	for( keys %{ $rx[0]{$e} } ) {	# OS элемента
+	    next _M_redox_1 unless exists( $rx[1]{$e}{$_} ); # Другая в продуктах
+	}
+
+	for( keys %{ $rx[1]{$e} } ) {	# OS элемента
+	    next _M_redox_1 unless exists( $rx[0]{$e}{$_} ); # Другая в исходных
+	}
+	# Удалить не ОВР элементы
+	delete $rx[$_]{$e} for 0,1;
+    }
+
+    # не ОВР
+    return if ! keys( %{ $rx[0] } ) || ! keys( %{ $rx[1] } );
+#    return undef unless keys( %{ $rx[1] } );
+
+    my %del_rx;	# хеш исключённых в-в
+    my %redox;	# результаты
+
+_M_redox_2:
+    while( 1 ){
+	my %vv;	# $vv{в-во} {'yes'} = встечаемость в-ва в redox-парах
+		#            {'os'}{элемент} = 1 - Элементы меняющие свою OS
+
+	for my $e ( keys %{ $rx[0] } ){	# Элементы (берём из исходных)
+	    for my $os_i ( keys %{ $rx[0]{$e} } ) { # OS элемента в исх.
+		for my $os_p ( keys %{ $rx[1]{$e} } ) { # OS элемента в продуктах
+
+
+# !!! Продумать дробные степени окисления (сделано)
+		    my $n_os_i = Math::BigRat -> new("$os_i") -> numify();
+		    my $n_os_p = Math::BigRat -> new("$os_p") -> numify();
+
+		    my $nm; # название: oxidant / reducer
+		    if($n_os_i > $n_os_p){ # Окислитель?
+			$nm = 'oxidant';
+
+		    }elsif($n_os_i < $n_os_p){ # Восстановитель?
+			$nm = 'reducer';
+
+		    }else{
+			next;
+		    }
+
+		    # Составляем пару
+		    while( my($v_i, $n_i) = each %{ $rx[0]{$e}{$os_i} } ){ # исх. в-ва и кол-во атомов
+			next if exists $del_rx{$v_i}; # исключённое в-во
+
+			$vv{$v_i}{'yes'}++;
+			$vv{$v_i}{'os'}{$e} = 1; # Элементы меняющие свою OS
+
+			while( my($v_p, $n_p) = each %{ $rx[1]{$e}{$os_p} } ){ # продукты и кол-во атомов
+			    next if exists $del_rx{$v_p}; # исключённое в-во
+
+			    $vv{$v_p}{'yes'}++;
+			    $vv{$v_p}{'os'}{$e} = 1; # Элементы меняющие свою OS
+
+			    my $lcm = blcm($n_i, $n_p); # наименьший общий множитель кол-ва атомов
+
+			    my($c, $z) = Math::BigRat->new("$os_i")->parts();
+			    my $ee = $lcm * $c / $z;
+
+			    ($c, $z) = Math::BigRat->new("$os_p")->parts();
+			    $ee -= $lcm * $c / $z;
+			    
+			    # Принятые элек-ны, OS, число атомов и
+			    # множители на MAX число атомов исх. и прод.
+			    @{ $redox{$nm}{$e}{"$v_i->$v_p"} } = ( abs($ee),
+							$os_i, $os_p,
+							$n_i, $n_p,
+							$lcm / $n_i, $lcm / $n_p );
+			}
+		    }
+		}
+	    }
+	}
+
+	# !!! Интуитивно исключаем из redox-списков не ОВР в-ва
+	for my $nm ( 'oxidant','reducer' ){
+	    for my $e ( keys %{ $redox{$nm} } ){ # Элементы
+
+		# Redox-пары элемента
+		next if keys %{ $redox{$nm}{$e} } < 2; # одна пара
+
+		for my $i_k ( keys %{ $redox{$nm}{$e} } ){
+		    for( split "->",$i_k ){
+			next if $ve{$_} < 3; # кол-во Элементов в в-ве
+			next if $vv{$_}{'yes'} > 1; # в-во встречается часто
+			next if keys %{ $vv{$_}{'os'} } > 1; # OS меняет более 1 Элемента
+
+			$del_rx{$_} = ''; # внести в список исключённых в-в
+			%redox = ();	# очистить
+			next _M_redox_2;
+		    }
+		}
+	    }
+
+
+	}
+	return keys( %{ $redox{'oxidant'} } ) && keys( %{ $redox{'reducer'} } ) ? \%redox : undef; # не ОВР
+    }
+}
+
+
 sub _search_atoms_subs{
     my $chem_eq = shift;
 
@@ -510,6 +1054,15 @@ croak("'$s' is not substance!");
     return( \%atoms_substance, scalar(keys %atoms) );
 }
 
+# Transform classic into brutto (gross) formula
+sub brutto_formula{
+    my $s = shift;
+
+    my %e = eval{ Chemistry::File::Formula->parse_formula($s) } or
+croak("'$s' is not substance!");
+
+    return( join( '', map{ "$_$e{$_}" } sort { $a cmp $b } keys %e ) );
+}
 
 # Decomposes the chemical equation to
 # arrays of initial substances and products
@@ -522,7 +1075,7 @@ sub parse_chem_mix{
     s/^\s+//;
     s/\s+$//;
 
-    my $m = qr/\s*[ ,;+]\s*/;	# mask of delimeters
+    my $m = qr/\s*[ ,;+]+\s*/;	# mask of delimeters
 
     # to unite the separeted numerals ( coefficient ? )
     1 while s/((?:$m|^)[1-9]+)$m([1-9]+(?:$m|$))/$1$2/g;
@@ -660,7 +1213,9 @@ sub _p_c_m{
 sub oxidation_state{
     my $s = shift || return;
 
-    my @species = $s =~ /$RE{balanced}{-parens=>'{}'}\d*/g;
+    our $mask;
+    $mask = qr/{(?:(?>[^{}]+)|(??{$mask}))*}\d*/;
+    my @species = $s =~ /$mask/g;
 
     # One substance
     return &_in_os($s) if @species < 2 || $s ne join('',@species);
@@ -944,13 +1499,13 @@ sub _read_atoms{
 
     my $adb = &_atoms_db;
 
-    for( my $i = 0; $i < @$adb; $i+=4 ){
+    for( my $i = 0; $i < @$adb; $i+=5 ){
 	$_ = $adb->[$i];
 	next if !exists $atoms->{ $_ };
 
-	$atom_el_neg{ $_ } = $adb->[$i+1];
-	$intermet = 0 unless $adb->[$i+2];	# Not intermetallic compound
-	$atom_OS{ $_ } = $adb->[$i+3];
+	$atom_el_neg{ $_ } = $adb->[$i+2];
+	$intermet = 0 unless $adb->[$i+3];	# Not intermetallic compound
+	$atom_OS{ $_ } = $adb->[$i+4];
     }
 
     \%atom_el_neg, \%atom_OS, $intermet;
@@ -1044,126 +1599,129 @@ ELEMENT_MACRO_1:
 }
 
 
-# Pauling scale (adapted)
+# Pauling scale (adapted).
+# Atomic weights from NIST.
 # Attention!
 #	order of OSE is important (last are exotic OSE)
 sub _atoms_db{
 		return [
-'Ac',	110,	1,	[0, 3],
-'Ag',	193,	1,	[0, 1, 2, 3, 5],
-'Al',	161,	1,	[-3, 0, 1, 2, 3],
-'Am',	113,	1,	[0, 2, 3, 4, 5, 6],
-'Ar',	0,	0,	[0],
-'As',	221,	0,	[-3, 0, 3, 5],	# 2
-'At',	225,	0,	[-1, 0, 1, 5, 7],	# 3
-'Au',	254,	1,	[0, 1, 2, 3, 5, 7],	# -1
-'B',	204,	0,	[-3, 0, 1, 2, 3],
-'Ba',	89,	1,	[0, 2],
-'Be',	157,	1,	[0, 2],
-'Bh',	0,	1,	[0, 7],
-'Bi',	221,	0,	[-3, 0, 2, 3, 5],
-'Bk',	130,	1,	[0, 3, 4],
-'Br',	296,	0,	[-1, 0, 1, 3, 4, 5, 6, 7],
-'C',	255,	0,	[-4, -3, -1, 0, 2, 3, 4],	# -2, 1
-'Ca',	100,	1,	[0, 2],
-'Cd',	169,	1,	[0, 2],
-'Ce',	112,	1,	[0, 3, 4],	# 2
-'Cf',	130,	1,	[0, 2, 3, 4],
-'Cl',	316,	0,	[-1, 0, 1, 3, 4, 5, 6, 7],	# 2
-'Cm',	128,	1,	[0, 3, 4],
-'Co',	188,	1,	[0, 1, 2, 3, 4],	# -1,  5
-'Cr',	166,	1,	[0, 1, 2, 3, 4, 5, 6],	# -2, -1
-'Cs',	79,	1,	[0, 1],
-'Cu',	190,	1,	[0, 2, 1, 3],		# 4
-'D',	220,	0,	[-1, 0, 1],
-'Db',	0,	1,	[0, 5],
-'Ds',	0,	1,	[0],
-'Dy',	122,	1,	[0, 3, 4],	# 2
-'Er',	124,	1,	[0, 3],
-'Es',	130,	1,	[0, 2, 3],
-'Eu',	120,	1,	[0, 2, 3],
-'F',	400,	0,	[-1, 0],
-'Fe',	183,	1,	[0, 2, 3, 6, 8, 4, 5],	# -2, -1,  1
-'Fm',	130,	1,	[0, 2, 3],
-'Fr',	70,	1,	[0, 1],
-'Ga',	181,	1,	[0, 1, 2, 3],
-'Gd',	120,	1,	[0, 3],		# 1,  2
-'Ge',	201,	0,	[-4, -2, 0, 2, 4],	# 1,  3
-'H',	220,	0,	[-1, 0, 1],
-'He',	0,	0,	[0],
-'Hf',	130,	1,	[0, 2, 3, 4],
-'Hg',	200,	1,	[0, 1, 2],	# 4
-'Ho',	123,	1,	[0, 3],
-'Hs',	0,	1,	[0, 7],
-'I',	266,	0,	[-1, 0, 1, 3, 5, 7],
-'In',	178,	1,	[0, 1, 2, 3],
-'Ir',	220,	1,	[0, 1, 2, 3, 4, 5, 6, 8],	# -3, -1
-'K',	82,	1,	[0, 1],
-'Kr',	0,	0,	[0, 2, 4, 6],
-'Ku',	0,	1,	[0],
-'La',	110,	1,	[0, 3],		# 2
-'Li',	98,	1,	[0, 1],
-'Lr',	129,	1,	[0, 3],
-'Lu',	127,	1,	[0, 3],
-'Md',	130,	1,	[0, 2, 3],
-'Mg',	131,	1,	[0, 2],
-'Mn',	155,	1,	[0, 1, 2, 3, 4, 5, 6, 7],	# -3, -2, -1
-'Mo',	216,	1,	[0, 2, 3, 4, 5, 6],	# -2, -1,  1
-'Mt',	0,	1,	[0, 4],
-'N',	304,	0,	[-3, -2, -1, 0, 1, 2, 3, 4, 5],
-'Na',	93,	1,	[0, 1],
-'Nb',	160,	1,	[0, 1, 2, 3, 4, 5],	# -1
-'Nd',	114,	1,	[0, 3],		# 2
-'Ne',	0,	0,	[0],
-'Ni',	191,	1,	[0, 2, 3, 4, 1],	# -1
-'No',	130,	1,	[0, 2, 3],
-'Np',	136,	1,	[0, 3, 4, 5, 6],	# 7
-'Ns',	0,	1,	[0],
-'O',	344,	0,	[-2, -1, 0, 1, 2],
-'Os',	220,	1,	[0, 2, 3, 4, 5, 6, 7, 8],	# -2, -1,  1
-'P',	221,	0,	[-3, -2, 0, 1, 3, 4, 5],	# -1,  2
-'Pa',	150,	1,	[0, 3, 4, 5],
-'Pb',	233,	1,	[-4, 0, 2, 4],
-'Pd',	220,	1,	[0, 1, 2, 3, 4],
-'Pm',	113,	1,	[0, 3],
-'Po',	200,	1,	[-2, 0, 2, 4, 6],
-'Pr',	113,	1,	[0, 3, 4],	# 2
-'Pt',	228,	1,	[0, 2, 3, 4, 5, 6, 1],
-'Pu',	128,	1,	[0, 2, 3, 4, 5, 6],	# 7
-'Ra',	90,	1,	[0, 2, 4],
-'Rb',	82,	1,	[0, 1],
-'Re',	190,	1,	[0, 1, 2, 3, 4, 5, 6, 7],	# -3, -1
-'Rf',	0,	1,	[0, 4],
-'Rg',	0,	1,	[0],
-'Rh',	228,	1,	[0, 1, 2, 3, 4, 6],	# -1,  5
-'Rn',	0,	0,	[0, 2, 4, 6, 8],
-'Ru',	220,	1,	[0, 2, 3, 4, 5, 6, 7, 8],	# -2,  1
-'S',	258,	0,	[-2, 0, 1, 2, 3, 4, 6],	#-1,  5
-'Sb',	221,	1,	[-3, 0, 3, 4, 5],
-'Sc',	136,	1,	[0, 3],		# 1,  2
-'Se',	255,	0,	[-2, 0, 2, 4, 6],
-'Sg',	0,	1,	[0, 6],
-'Si',	190,	0,	[-4, 0, 2, 4],	# -3, -2, -1,  1,  3
-'Sm',	117,	1,	[0, 2, 3],
-'Sn',	196,	1,	[-4, -2, 0, 2, 4],
-'Sr',	95,	1,	[0, 2],
-'T',	220,	0,	[-1, 0, 1],
-'Ta',	150,	1,	[0, 1, 2, 3, 4, 5],	# -1
-'Tb',	110,	1,	[0, 3, 4],	# 1
-'Tc',	190,	1,	[0, 1, 2, 3, 4, 5, 6, 7],	# -3, -1
-'Te',	221,	0,	[-2, 0, 2, 4, 6],	# 5
-'Th',	130,	1,	[0, 2, 3, 4],
-'Ti',	154,	1,	[-2, 0, 2, 3, 4],	# -1
-'Tl',	162,	1,	[0, 1, 3],
-'Tm',	125,	1,	[0, 2, 3],
-'U',	138,	1,	[0, 3, 4, 5, 6],
-'V',	163,	1,	[0, 2, 3, 4, 5],	# -1,  1
-'W',	220,	1,	[0, 2, 3, 4, 5, 6],	# -2, -1,  1
-'Xe',	0,	0,	[0, 1, 2, 4, 6, 8],
-'Y',	122,	1,	[0, 3],		# 1,  2
-'Yb',	110,	1,	[0, 2, 3],
-'Zn',	165,	1,	[0, 2],
-'Zr',	133,	1,	[0, 2, 3, 4],		# 1
+'Ac',	227,		110,	1,	[0, 3],
+'Ag',	107.8682,	193,	1,	[0, 1, 2, 3, 5],
+'Al',	26.9815386,	161,	1,	[-3, 0, 3, 1, 2],
+'Am',	243,		113,	1,	[0, 2, 3, 4, 5, 6],
+'Ar',	39.948,		0,	0,	[0],
+'As',	74.9216,	221,	0,	[-3, 0, 3, 5],	# 2
+'At',	210,		225,	0,	[-1, 0, 1, 5, 7],	# 3
+'Au',	196.966569,	254,	1,	[0, 1, 2, 3, 5, 7],	# -1
+'B',	10.811,		204,	0,	[-3, 0, 1, 2, 3],
+'Ba',	137.327,	89,	1,	[0, 2],
+'Be',	9.012182,	157,	1,	[0, 2],
+'Bh',	272.13803,	0,	1,	[0, 7],
+'Bi',	208.9804,	221,	0,	[-3, 0, 2, 3, 5],
+'Bk',	247,		130,	1,	[0, 3, 4],
+'Br',	79.904,		296,	0,	[-1, 0, 1, 3, 4, 5, 6, 7],
+'C',	12.0107,	255,	0,	[-4, -3, -1, 0, 2, 3, 4],	# -2, 1
+'Ca',	40.078,		100,	1,	[0, 2],
+'Cd',	112.411,	169,	1,	[0, 2],
+'Ce',	140.116,	112,	1,	[0, 3, 4],	# 2
+'Cf',	251,		130,	1,	[0, 2, 3, 4],
+'Cl',	35.453,		316,	0,	[-1, 0, 1, 3, 4, 5, 6, 7],	# 2
+'Cm',	247,		128,	1,	[0, 3, 4],
+'Cn',	285.17411,	205,	1,	[0, 2, 4],
+'Co',	58.933195,	188,	1,	[0, 1, 2, 3, 4],	# -1,  5
+'Cr',	51.9961,	166,	1,	[0, 1, 2, 3, 4, 5, 6],	# -2, -1
+'Cs',	132.9054519,	79,	1,	[0, 1],
+'Cu',	63.546,		190,	1,	[0, 2, 1, 3],		# 4
+'D',	2.0141017778,	220,	0,	[-1, 0, 1],
+'Db',	268.12545,	0,	1,	[0, 5],		# old Ns
+'Ds',	281.16206,	0,	1,	[0, 6, 4, 2, 5],	# as Pt
+'Dy',	162.5,		122,	1,	[0, 3, 4],	# 2
+'Er',	167.259,	124,	1,	[0, 3],
+'Es',	252.08298,	130,	1,	[0, 2, 3],
+'Eu',	151.964,	120,	1,	[0, 2, 3],
+'F',	18.9984032,	400,	0,	[-1, 0],
+'Fe',	55.845,		183,	1,	[0, 2, 3, 6, 8, 4, 5],	# -2, -1,  1
+'Fm',	257.095105,	130,	1,	[0, 2, 3],
+'Fr',	223.0197359,	70,	1,	[0, 1],
+'Ga',	69.723,		181,	1,	[0, 1, 2, 3],
+'Gd',	157.25,		120,	1,	[0, 3],		# 1,  2
+'Ge',	72.64,		201,	0,	[-4, -2, 0, 2, 4],	# 1,  3
+'H',	1.00794,	220,	0,	[-1, 0, 1],
+'He',	4.002602,	0,	0,	[0],
+'Hf',	178.49,		130,	1,	[0, 2, 3, 4],
+'Hg',	200.59,		200,	1,	[0, 1, 2],	# 4
+'Ho',	164.93032,	123,	1,	[0, 3],
+'Hs',	270.13465,	0,	1,	[0, 7],
+'I',	126.90447,	266,	0,	[-1, 0, 1, 3, 5, 7],
+'In',	114.818,	178,	1,	[0, 1, 2, 3],
+'Ir',	192.217,	220,	1,	[0, 1, 2, 3, 4, 5, 6, 8],	# -3, -1
+'K',	39.0983,	82,	1,	[0, 1],
+'Kr',	83.798,		0,	0,	[0, 2, 4, 6],
+'Ku',	265.1167,	0,	1,	[0, 4],		# now Rf
+'La',	138.90547,	110,	1,	[0, 3],		# 2
+'Li',	6.941,		98,	1,	[0, 1],
+'Lr',	262.10963,	129,	1,	[0, 3],
+'Lu',	174.9668,	127,	1,	[0, 3],
+'Md',	258.098431,	130,	1,	[0, 2, 3],
+'Mg',	24.305,		131,	1,	[0, 2],
+'Mn',	54.938045,	155,	1,	[0, 1, 2, 3, 4, 5, 6, 7],	# -3, -2, -1
+'Mo',	95.96,		216,	1,	[0, 2, 3, 4, 5, 6],	# -2, -1,  1
+'Mt',	276.15116,	0,	1,	[0, 4],
+'N',	14.0067,	304,	0,	[-3, -2, -1, 0, 1, 2, 3, 4, 5],
+'Na',	22.98976928,	93,	1,	[0, 1],
+'Nb',	92.90638,	160,	1,	[0, 1, 2, 3, 4, 5],	# -1
+'Nd',	144.242,	114,	1,	[0, 3],		# 2
+'Ne',	20.1797,	0,	0,	[0],
+'Ni',	58.6934,	191,	1,	[0, 2, 3, 4, 1],	# -1
+'No',	259.10103,	130,	1,	[0, 2, 3],
+'Np',	237,		136,	1,	[0, 3, 4, 5, 6],	# 7
+'Ns',	268.12545,	0,	1,	[0, 5],		# now Db
+'O',	15.9994,	344,	0,	[-2, -1, 0, 1, 2],
+'Os',	190.23,		220,	1,	[0, 2, 3, 4, 5, 6, 7, 8],	# -2, -1,  1
+'P',	30.973762,	221,	0,	[-3, -2, 0, 1, 3, 4, 5],	# -1,  2
+'Pa',	231.03588,	150,	1,	[0, 3, 4, 5],
+'Pb',	207.2,		233,	1,	[-4, 0, 2, 4],
+'Pd',	106.42,		220,	1,	[0, 1, 2, 3, 4],
+'Pm',	145,		113,	1,	[0, 3],
+'Po',	209,		200,	1,	[-2, 0, 2, 4, 6],
+'Pr',	140.90765,	113,	1,	[0, 3, 4],	# 2
+'Pt',	195.084,	228,	1,	[0, 2, 3, 4, 5, 6, 1],
+'Pu',	244,		128,	1,	[0, 2, 3, 4, 5, 6],	# 7
+'Ra',	226,		90,	1,	[0, 2, 4],
+'Rb',	85.4678,	82,	1,	[0, 1],
+'Re',	186.207,	190,	1,	[0, 1, 2, 3, 4, 5, 6, 7],	# -3, -1
+'Rf',	265.1167,	0,	1,	[0, 4],		# old Ku
+'Rg',	280.16447,	0,	1,	[0, 3, 1, 2],	# as Au
+'Rh',	102.9055,	228,	1,	[0, 1, 2, 3, 4, 6],	# -1,  5
+'Rn',	222,		0,	0,	[0, 2, 4, 6, 8],
+'Ru',	101.07,		220,	1,	[0, 2, 3, 4, 5, 6, 7, 8],	# -2,  1
+'S',	32.065,		258,	0,	[-2, 0, 1, 2, 3, 4, 6],	#-1,  5
+'Sb',	121.76,		221,	1,	[-3, 0, 3, 4, 5],
+'Sc',	44.955912,	136,	1,	[0, 3],		# 1,  2
+'Se',	78.96,		255,	0,	[-2, 0, 2, 4, 6],
+'Sg',	271.13347,	0,	1,	[0, 6],
+'Si',	28.0855,	190,	0,	[-4, 0, 2, 4],	# -3, -2, -1,  1,  3
+'Sm',	150.36,		117,	1,	[0, 2, 3],
+'Sn',	118.71,		196,	1,	[-4, -2, 0, 2, 4],
+'Sr',	87.62,		95,	1,	[0, 2],
+'T',	3.0160492777,	220,	0,	[-1, 0, 1],
+'Ta',	180.94788,	150,	1,	[0, 1, 2, 3, 4, 5],	# -1
+'Tb',	158.92535,	110,	1,	[0, 3, 4],	# 1
+'Tc',	97.9072,	190,	1,	[0, 1, 2, 3, 4, 5, 6, 7],	# -3, -1
+'Te',	127.6,		221,	0,	[-2, 0, 2, 4, 6],	# 5
+'Th',	232.03806,	130,	1,	[0, 2, 3, 4],
+'Ti',	47.867,		154,	1,	[-2, 0, 2, 3, 4],	# -1
+'Tl',	204.3833,	162,	1,	[0, 1, 3],
+'Tm',	168.93421,	125,	1,	[0, 2, 3],
+'Tn',	220,		0,	0,	[0, 2, 4, 6, 8],	# as Rn^220
+'U',	238.02891,	138,	1,	[0, 3, 4, 5, 6],
+'V',	50.9415,	163,	1,	[0, 2, 3, 4, 5],	# -1,  1
+'W',	183.84,		220,	1,	[0, 2, 3, 4, 5, 6],	# -2, -1,  1
+'Xe',	131.293,	0,	0,	[0, 1, 2, 4, 6, 8],
+'Y',	88.90585,	122,	1,	[0, 3],		# 1,  2
+'Yb',	173.054,	110,	1,	[0, 2, 3],
+'Zn',	65.38,		165,	1,	[0, 2],
+'Zr',	91.224,		133,	1,	[0, 2, 3, 4],		# 1
     ]
 }
 
@@ -1176,6 +1734,9 @@ sub _ions_db{
 '[^O]OH(?![efgos])',	'H=1_O=-2',
 '.a~O',		'a~Cl,Br=1_O=-2',
 '.IO',		'I=1!3_O=-2',
+# oxychloride: phosgene (carbonyl dichloride), thionyl...
+'.OCl2',	'Cl=-1_O=-2',
+# '.OCl2',	'Cl=-1;1_O=-2',
 # meta- antimonites, arsenites and others
 '.a~O2',	'a~Sb,Al,Ni,As,Au,Co,Ga,Cl,Br,B=3_O=-2',
 # nitrites, dioxynitrates
@@ -1191,7 +1752,7 @@ sub _ions_db{
 '.a~O4',	'a~Sb,As,P,V,Ta,Nb=5_O=-2',
 # molybdates, tungstates, chromates and others (excepting peroxides)
 '.a~O4(?=[^O]|Os|$)',	'a~Kr,U,S,Se,Te,Mo,W,Cr,Pu,Os=6_O=-2',
-# per- chlorates, bromates, iodates
+# per- chlorates, bromates
 '.a~O4',	'a~Cl,Br=7_O=-2',
 # rhodanides (thiocyanates) and for selenium
 '.(?:a~CN|a~NC|CNa~|Ca~N|Na~C|NCa~)(?![a-gik-pr-u])',	'a~S,Se=-2_C=4_N=-3',
@@ -1207,8 +1768,9 @@ sub _ions_db{
 '.a~O5',	'a~Fe,Pu=6_O=-2',
 '.ReO5',	'Re=7_O=-2',
 
-'.IO[56]',	'I=7_O=-2',
+'.I(?:O[56]|2O9)',	'I=7_O=-2',
 '^I2O4$',	'I=3;5_O=-2',
+'^I4O9$',	'I=3;5;5;5_O=-2',
 
 '.SnO6',	'Sn=4_O=-2',
 '.SbO6',	'Sb=5_O=-2',
@@ -1222,7 +1784,7 @@ sub _ions_db{
 # thiazates, thionitrites
 '.(?:NSO|SNO|NOS)(?=[\]\)\}]|$)',	'N=3_S=-2_O=-2',
 # sulphites
-'.SO3(?=[^OS]|Os|S[bcegimnr]|$)',	'S=4_O=-2',
+'.SO3(?=[^OS]|Os|S[bcegimnr]|$)',	'S=4!6_O=-2',
 # thiosulphates
 '.S2O3',	'S=6;-2_O=-2',
 # peroxydisulfuric (marshal's) acid
@@ -1252,7 +1814,7 @@ sub _ions_db{
 # salts of hyponitrous acid
 '.N2O2',	'N=1_O=-2',
 
-# salts of азотноватой (триоксодиазотной) acid
+# salts of hyponitrates (триоксодиазотной) acid
 '.N2O3',	'N=2_O=-2',
 
 # salts of nitroxylic acid
@@ -1265,6 +1827,8 @@ sub _ions_db{
 # nitrosyl- group | ion
 '(?:[\[\(]NO[\]\)])',	'N=2!3_O=-2',
 '^a~(?:[\[\(]NO[\]\)])\d*$',	'a~Fe,Ru,Cr=0_N=2_O=-2',
+# hydroxylamine & its salts
+'NH[23]O.',	'H=1_N=-1_O=-2',
 # ammonia, amide
 'NH[234]',	'H=1_N=-3',
 
@@ -1299,6 +1863,7 @@ sub _ions_db{
 '^U3O8$',	'U=5;5;6_O=-2',	# triuranium octoxide
 '^Pb2O3$',	'Pb=2;4_O=-2',
 '^Sb2O4$',	'Sb=3;5_O=-2',
+'^Ag2O2$',	'Ag=1;3_O=-2',	# silver peroxide
 '^a~3O4$',	'a~Pb,Pt=2;2;4_O=-2',
 '^a~3O4$',	'a~Fe,Co,Mn=2;3;3_O=-2',
 # carbonyls
@@ -1317,6 +1882,7 @@ sub _ions_db{
 '^(?:\(O2\)|O2)(?![F])',	'O=1;0',
 # chromium peroxide
 '^CrO5$',	'Cr=6_O=-2;-1;-1;-1;-1',
+'^Cr2O8$',	'Cr=6_O=-2;-2;-2;-2;-1;-1;-1;-1',
 # rhenium, iodine, chlorine peroxide
 '^a~2O8$',	'a~Re,I,Cl=7_O=-2;-2;-2;-2;-2;-2;-1;-1',
 # sulfur peroxide
@@ -1335,13 +1901,13 @@ sub _ions_db{
 # oxofluorides
 '.ClO3F2',	'Cl=7_O=-2_F=-1',
 '.ClO2F4',	'Cl=7_O=-2_F=-1',
-
-'^Fe2P',	'P=5_Fe=-2;-3',
 # platinum hexafluoride (strongest oxidizer)
-'.PtF[6-9]$',	'Pt=5_F=-1',
+'.PtF[6-9][\]\)]?$',	'Pt=5_F=-1',
 # chlorine nitrides
 '^(?:Cl3N|NCl3)$',	'Cl=1_N=-3',
 '.(?:ClN|NCl)',		'Cl=1_N=-3',
+
+'^Fe2P',	'P=5_Fe=-2;-3',
 # exotic
 '^FNO3$',	'F=1_N=5_O=-2',
 	]
@@ -1357,7 +1923,7 @@ Chemistry::Harmonia - Decision of simple and difficult chemical puzzles.
 
 =head1 SYNOPSIS
 
-  use Chemistry::Harmonia qw(:redox);
+  use Chemistry::Harmonia qw( :all );
   use Data::Dumper;
 
   for my $formula ('Fe3O4', '[Cr(CO(NH2)2)6]4[Cr(CN)6]3'){
@@ -1394,6 +1960,80 @@ Will print something like:
                     'OS' => [ [ 3 ], [ 2 ] ]
                   }
         };
+
+
+To balance the chemical mix (equations of reactions), i.e. for list of the substances (reactants and products)
+find all the possible "chemical true" balanced equations of reactions and the stoichiometric coefficients
+of substances:
+
+  print Dumper stoichiometry( 'NaOH, HCl, KOH, LiOH, KCl, NaCl, LiCl H2O' );
+
+Will print the result:
+
+  $VAR1 = [
+          '1 LiCl + 1 NaOH == 1 NaCl + 1 LiOH',
+          '1 KCl + 1 NaOH == 1 NaCl + 1 KOH',
+          '1 LiCl + 1 KOH == 1 KCl + 1 LiOH',
+          '1 HCl + 1 LiOH == 1 LiCl + 1 H2O',
+          '1 HCl + 1 NaOH == 1 NaCl + 1 H2O',
+          '1 HCl + 1 KOH == 1 KCl + 1 H2O'
+        ];
+
+Or the chemical equation e.g.:
+
+  my $chemical_equation = 'KMnO4 + H2O2 + H2SO4 --> K2SO4 + MnSO4 + H2O + O2';
+  print Dumper stoichiometry( $chemical_equation );
+
+Will print the results:
+
+  $VAR1 = [
+          '5 H2O2 + 3 H2SO4 + 2 KMnO4 == 8 H2O + 5 O2 + 1 K2SO4 + 2 MnSO4',
+          '2 H2O + 3 H2SO4 + 2 KMnO4 == 5 H2O2 + 1 K2SO4 + 2 MnSO4',
+          '6 H2SO4 + 4 KMnO4 == 6 H2O + 5 O2 + 2 K2SO4 + 4 MnSO4',
+          '2 H2O2 == 2 H2O + 1 O2',
+          '3 H2SO4 + 2 KMnO4 == 3 H2O2 + 1 O2 + 1 K2SO4 + 2 MnSO4'
+        ];
+
+Or at a specified some stoichiometric coefficients e.g.:
+
+  print Dumper stoichiometry( '2 KMnO4 + 5 H2O2, H2SO4 K2SO4 MnSO4 + H2O, O2' );
+
+Will print one result:
+
+  $VAR1 = [
+          '5 H2O2 + 3 H2SO4 + 2 KMnO4 == 8 H2O + 5 O2 + 1 K2SO4 + 2 MnSO4'
+        ];
+
+The example of the classic chemical equations with huge stoichiometric coefficients:
+
+  for my $ce (
+    '[Cr(CO(NH2)2)6]4[Cr(CN)6]3, KMnO4, H2SO4, K2Cr2O7, KNO3, CO2, K2SO4, MnSO4, H2O',
+    'Na4[Fe(CN)6] NaMnO4 H2SO4 NaHSO4 Fe2(SO4)3 MnSO4 HNO3 CO2 H2O'
+    ){
+	print Dumper stoichiometry( $ce );
+  }
+
+Will print results:
+
+  $VAR1 = [
+          '1399 H2SO4 + 10 [Cr(CO(NH2)2)6]4[Cr(CN)6]3 + 1176 KMnO4 == 1879 H2O + 660 KNO3 + 35 K2Cr2O7 + 420 CO2 + 1176 MnSO4 + 223 K2SO4'
+        ];
+  $VAR1 = [
+          '299 H2SO4 + 10 Na4[Fe(CN)6] + 122 NaMnO4 == 162 NaHSO4 + 188 H2O + 60 HNO3 + 60 CO2 + 122 MnSO4 + 5 Fe2(SO4)3'
+        ];
+
+And even e.g.:
+
+  my $mix = 'H2 Ca(CN)2 NaAlF4 FeSO4 MgSiO3 KI H3PO4 PbCrO4 BrCl CF2Cl2 SO2 PbBr2 CrCl3 MgCO3 KAl(OH)4 Fe(SCN)3 PI3 NaSiO3 CaF2 H2O';
+  print Dumper stoichiometry( $mix );
+
+Will print result:
+
+  $VAR1 = [
+          '24 BrCl + 6 CF2Cl2 + 6 NaAlF4 + 119 H2 + 2 H3PO4 + 6 KI + 6 MgSiO3 + 18 Ca(CN)2 + 12 PbCrO4 + 12 FeSO4 + 24 SO2 == 
+  12 PbBr2 + 12 CrCl3 + 18 CaF2 + 110 H2O + 6 KAl(OH)4 + 6 MgCO3 + 6 NaSiO3 + 2 PI3 + 12 Fe(SCN)3'
+        ];
+:)
 
 Transformation of the chemical mix in reagent and product arrays:
 
@@ -1453,6 +2093,14 @@ Will output:
           }
         ];
 
+Transforms classic chemical formula of substance into the brutto formula:
+
+ print brutto_formula( '[Cr(CO(NH2)2)6]4[Cr(CN)6]3' );
+
+Will output:
+
+  C42Cr7H96N66O24
+
 TTC reaction. Proceeding example above:
 
   print Dumper ttc_reaction( $ce );
@@ -1476,14 +2124,94 @@ are all oriented to known rules and laws of general and physical chemistry.
 
 Chemistry::Harmonia provides these subroutines:
 
+    stoichiometry( $mix_of_substances [, \%facultative_parameters ] )
     oxidation_state( $formula_of_substance )
     parse_chem_mix( $mix_of_substances [, \%coefficients ] )
     good_formula( $abracadabra [, { 'zero2oxi' => 1 } ] )
+    brutto_formula( $formula_of_substance )
     prepare_mix( \@reactants_and_products [, \%facultative_parameters ] )
     class_cir_brutto( \@reactants_and_products [, \%coefficients ] )
     ttc_reaction( \@reactants_and_products )
 
+
 All of them are context-sensitive.
+
+
+=head2 stoichiometry( $mix_of_substances [, \%facultative_parameters ] )
+
+This subroutine balances the chemical mix (equations of reactions), i.e. for list of the substances (reactants and products)
+or the reactions find ALL the possible "chemical true" balanced equations of reactions and the stoichiometric coefficients
+of the substances. The results return as the ref to array of the balanced equations
+or C<undef> is no solutions.
+
+Using the algebraic method and unique redox-algorithm, C<stoichiometry> will make a atomic matrices for the equations of chemical reactions 
+to solve the matrices and to find a fundamental set of stoichiometric coefficients for a random mixture of chemical compounds.
+A special feature is ability of C<stoichiometry> to recognize oxidation-reduction reactions and to find chemical correct the 
+stoichiometric coefficients.
+
+This subroutine parses C<$mix_of_substances> (usually participants of the chemical reaction),
+i.e. the list of reactants (initial substances) and products (substances formed in the chemical reaction).
+For details, see please subroutine C<parse_chem_mix>.
+
+The following can be C<%facultative_parameters>: C<'coefficients'> and C<'redox_pairs'>.
+
+C<'coefficients'> - ref to hash stoichiometry coefficients for substances.
+E.g.:
+
+  my $ce = 'PbS + O3 = PbSO4 + O2';
+  print Dumper stoichiometry( $ce );
+
+Will print results:
+
+  $VAR1 = [
+          '4 O3 + 3 PbS == 3 PbSO4',
+          '2 O3 == 3 O2',
+          '2 O2 + 1 PbS == 1 PbSO4'
+        ];
+
+With specified some coefficients:
+
+  my $k = { 'O3' => 4, 'O2' => 4 };
+  print Dumper stoichiometry( $ce, { 'coefficients' => $k } );
+
+Will print one result:
+
+  $VAR1 = [
+          '4 O3 + 1 PbS == 4 O2 + 1 PbSO4'
+        ];
+
+Ditto:
+
+  print Dumper stoichiometry( 'PbS + 4 O3 = PbSO4 + 4 O2' );
+
+Result:
+
+  $VAR1 = [
+          '4 O3 + 1 PbS == 4 O2 + 1 PbSO4'
+        ];
+
+Another argument of C<%facultative_parameters> is C<'redox_pairs'>.
+If C<'redox_pairs'> is 0 then disable redox-algorithm.
+By default, redox-algorithm is active.
+Some e.g.:
+
+  print Dumper stoichiometry( 'KMnO4 H2O2 H2SO4 K2SO4 MnSO4 H2O O2', { 'redox_pairs' => 0 } );
+
+Will only 4 equations:
+
+  $VAR1 = [
+          '2 H2O + 3 H2SO4 + 2 KMnO4 == 5 H2O2 + 1 K2SO4 + 2 MnSO4',
+          '6 H2SO4 + 4 KMnO4 == 6 H2O + 5 O2 + 2 K2SO4 + 4 MnSO4',
+          '2 H2O2 == 2 H2O + 1 O2',
+          '3 H2SO4 + 2 KMnO4 == 3 H2O2 + 1 O2 + 1 K2SO4 + 2 MnSO4'
+        ];
+
+For some mix of substabces solution is able to be very long, so you can use C<'redox_pairs'>.
+
+The C<stoichiometry> protesting for over 24,600 unique inorganic reactions.
+Yes, to me it was hard to make it.
+
+Beware use very big C<$mix_of_substances>!
 
 
 =head2 oxidation_state( $formula_of_substance )
@@ -1504,14 +2232,14 @@ If you doesn't know formulas of chemical elements and/or Periodic Table
 use subroutine C<good_formula()>.
 I insist to do it always anyway :)
 
-Now C<oxidation_state()> is checked for over 6500 unique inorganic substances.
+Now C<oxidation_state()> is checked for over 6760 unique inorganic substances.
 
 
 =head2 parse_chem_mix( $mix_of_substances [, \%coefficients ] )
 
 A chemical equation consists of the chemical formulas of the reactants
 and products. This subroutine parses C<$mix_of_substances> (usually chemical equation)
-to arrays of the reactants (initial substances) and products
+to list of the reactants (initial substances) and products
 (substances formed in the chemical reaction).
 It is the most simple and low-cost way to carry out reaction without
 reactants :).
@@ -1708,6 +2436,21 @@ to low case as:
 Beware use very long C<$abracadabra>!
 
 
+=head2 brutto_formula( $formula_of_substance )
+
+This subroutine transforms classic chemical C<$formula_of_substance> into the brutto (bruta, gross) formula:
+
+ print brutto_formula( '[Cr(CO(NH2)2)6]4[Cr(CN)6]3' );
+
+Output:
+
+  'C42Cr7H96N66O24'
+
+In brutto formula every the chemical element identified through its chemical symbol.
+The atom number of every present chemical element in the classic C<$formula_of_substance> indicated 
+by the sequebatur number.
+
+
 =head2 prepare_mix( \@reactants_and_products [, \%facultative_parameters ] )
 
 This subroutine simple but useful. It forms the chemical mix (equation)
@@ -1771,7 +2514,7 @@ in the range 0..2^32-1, i.e. 0..4,294,967,295.
 The nature is diversiform, but we search simple decisions :)
 
 The C<class_cir_brutto()> protesting CLASS-CIR
-for over 23,300 unique inorganic reactions.
+for over 24,600 unique inorganic reactions.
 Yes, to me it was hard to make it.
 
 
@@ -1793,40 +2536,40 @@ Will output:
         };
 
 
-=head2 EXPORT
+=head1 EXPORT
 
 Chemistry::Harmonia exports nothing by default.
 Each of the subroutines can be exported on demand, as in
 
   use Chemistry::Harmonia qw( oxidation_state );
 
-the tag C<redox> exports the subroutines C<oxidation_state>,
+the tag C<redox> exports the subroutines C<oxidation_state>, C<redox_test>,
 C<parse_chem_mix> and C<prepare_mix>:
 
-  use Chemistry::Harmonia qw(:redox);
+  use Chemistry::Harmonia qw( :redox );
 
-the tag C<equation> exports the subroutines C<good_formula>,
+the tag C<equation> exports the subroutines C<stoichiometry>,
+C<good_formula>, C<brutto_formula>,
 C<parse_chem_mix>, C<prepare_mix>, C<class_cir_brutto> and
 C<ttc_reaction>:
 
-  use Chemistry::Harmonia qw(:equation);
+  use Chemistry::Harmonia qw( :equation );
 
 and the tag C<all> exports them all:
 
-  use Chemistry::Harmonia qw(:all);
+  use Chemistry::Harmonia qw( :all );
 
 
 =head1 DEPENDENCIES
 
 Chemistry::Harmonia is known to run under perl 5.8.8 on Linux.
-The distribution uses
-L<Chemistry::File::Formula>,
+The distribution uses L<Chemistry::File::Formula>,
 L<Algorithm::Combinatorics>,
-L<Regexp::Common>,
 L<Math::BigInt>,
 L<Math::BigRat>,
 L<Math::Assistant>,
-L<String::CRC::Cksum>
+L<String::CRC::Cksum>,
+L<Data::Dumper>
 and L<Carp>.
 
 
@@ -1838,7 +2581,11 @@ ed.), Oxford: Butterworth-Heinemann
 Irving Langmuir. The arrangement of electrons in atoms and molecules. J. Am.
 Chem. Soc. 1919, 41, 868-934.
 
-L<Chemistry-Elements>, L<Chemistry::Mol>, L<Chemistry::File> and
+Alessandro N.Gorohovski. The theory and practice of stoichiometry of chemical reactions.
+Transactions of Donetsk National Technical University, -2011, -pp.211-217
+http://ea.donntu.edu.ua:8080/jspui/handle/123456789/3424
+
+L<Chemistry::Elements>, L<Chemistry::Mol>, L<Chemistry::File> and
 L<Chemistry::MolecularMass>.
 
 
@@ -1848,7 +2595,7 @@ Alessandro Gorohovski, E<lt>angel@domashka.kiev.uaE<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2010-2011 by A. N. Gorohovski
+Copyright (C) 2010-2013 by A. N. Gorohovski
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.8.8 or,

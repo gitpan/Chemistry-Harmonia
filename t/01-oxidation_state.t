@@ -1,5 +1,6 @@
 use strict;
 use warnings;
+no warnings 'recursion';
 
 use Test::More 'no_plan';
 
@@ -57,6 +58,17 @@ exit;
 # BD for test oxidation_state()
 sub datest{
     return {
+	'Ca(Cl)OCl' => 'Ca=2_O=-2_Cl=-1_Cl=1',
+	'Xe[PtF6]' => 'Xe=1_Pt=5_F=-1',
+	'I4O9' => 'I=3;5;5;5_O=-2',
+	'I(IO3)3' => 'I=3_I=5_O=-2',
+	'Cr2O8' =>	'Cr=6_O=-2;-2;-2;-2;-1;-1;-1;-1',
+	'K2(SO3)2NO' =>	'S=4_O=-2_O=-2_N=4_K=1',
+	'(NO)SO3Cl' =>	'S=6_Cl=-1_O=-2_O=-2_N=3',
+	'N(SO3K)3' =>	'S=6_O=-2_N=-3_K=1',
+	'HONHSO3K' =>	'H=1_H=1_S=6_O=-2_O=-2_N=-1_K=1',
+	'NH3OHCl' =>	'H=1_H=1_Cl=-1_O=-2_N=-1',
+	'Ag2O2' =>	'Ag=1;3_O=-2',
 	'Na4[Fe(CN)5(NOS)]' =>	'Na=1_Fe=2_C=2_N=-3_N=3_S=-2_O=-2',
 	'H3NSO3' =>	'H=1_S=6_O=-2_N=-3',
 	'(NH4)2SnCl6' =>	'H=1_Sn=4_N=-3_Cl=-1',
@@ -217,5 +229,7 @@ sub datest{
 	'HSO3(NH2)' => 'H=1_H=1_S=6_O=-2_N=-3',
 	'HPO2(NH2)2' => 'H=1_H=1_P=5_O=-2_N=-3',
 	'[NO]ClO4' => 'Cl=7_N=3_O=-2_O=-2',
+	'[NO2]ClO4' => 'Cl=7_N=5_O=-2_O=-2',
+	'NClO6' => 'Cl=7_N=5_O=-2',
     }
 }

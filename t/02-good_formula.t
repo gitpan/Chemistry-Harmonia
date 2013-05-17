@@ -16,6 +16,7 @@ for my $abracadabra ( keys %$dt ){
 }
 
 $dt = { 'h20' => [ 'H20', 'H2O' ],
+	'l1202' => ['Li202', 'Li2O2'],
 	'a120' => [ 'Al20', 'Al2O' ],
 	'a1203' => [ 'Al203', 'Al2O3' ],
 	'Si204' => [ 'Si204', 'SI204', 'Si2O4', 'SI2O4' ],
@@ -30,6 +31,12 @@ exit;
 
 sub datest{
     return {
+	'H04' => [ 'Ho4', 'HO4' ],
+	'H3P04' => [ 'H3Po4', 'H3PO4' ],
+	'H2C03' => [ 'H2Co3', 'H2CO3' ],
+	'HN03' => [ 'HNo3', 'HNO3' ],
+	'H2SO4.' => [ 'H2SO4' ],
+	'NACL' => [ 'NaCl' ],
 	'ALCL3' => [ 'AlCl3' ],
 	'Si204' => [ 'Si204', 'SI204' ],
 	'o$' => [ 'Os', 'OS' ],
@@ -61,7 +68,9 @@ sub datest{
 	'al2(so4)3*10h20' => [ '{Al2(SO4)3}{H20}10' ],
 	'{[cr(c0(nh2)2)6]4[cr(cn)6{df}]3}' => [
 		'[Cr(CO(NH2)2)6]4[Cr(CN)6{DF}]3',
-		'[Cr(Co(NH2)2)6]4[Cr(CN)6{DF}]3'
+		'[Cr(Co(NH2)2)6]4[Cr(CN)6{DF}]3',
+		'[Cr(CO(NH2)2)6]4[Cr(Cn)6{DF}]3',
+		'[Cr(Co(NH2)2)6]4[Cr(Cn)6{DF}]3'
 		],
 	'ggg[crr(cog(nhr2)2)6]4[qcr(rcn)5j]3rrrrr' => [
 		'[Cr(CO(NH2)2)6]4[Cr(CN)5I]3',
