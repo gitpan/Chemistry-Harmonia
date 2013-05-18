@@ -1,5 +1,9 @@
 Revision history for Perl extension Chemistry::Harmonia.
 
+0.118  2013-05-18
+	- Fixed the subroutine prepare_mix() for Perl v5.17.x, v5.18.0 ("Hash randomization")
+	- Fixed tests of the subroutine stoichiometry() for Perl v5.17.x, v5.18.0 ("Hash randomization")
+
 0.111  2013-05-18
 	- Fixed tests for new subroutine stoichiometry()
 

@@ -57,10 +57,10 @@ sub _ts{
 			"$ccn->[0]$ccn->[1]";
 			} @{ $dt->{$mix} }
 		) ], "Stoichiometry test '$mix' $msg" );
+
+	$op->{'coefficients'} = { };	# Сбрасываем опции
     }
 }
-
-exit;
 
 sub datest{
     return {

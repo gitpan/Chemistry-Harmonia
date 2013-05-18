@@ -51,7 +51,7 @@ our @EXPORT_OK = ( @{ $EXPORT_TAGS{'all'} } );
 
 our @EXPORT = qw( );
 
-our $VERSION = '0.111';
+our $VERSION = '0.118';
 
 use base qw(Exporter);
 
@@ -411,7 +411,7 @@ sub class_cir_brutto{
 	    my %e = Chemistry::File::Formula->parse_formula( $s );
 
 	    # for brutto
-	    $bf{ $s } = join( '', map{ "$_$e{$_}" } sort { $a cmp $b } keys %e );
+	    $bf{ $s } = join '', map( "$_$e{$_}", sort{ $a cmp $b } keys %e );
 
 	    # for cir
 	    push @cir, $k.$bf{ $s };
@@ -471,7 +471,9 @@ sub prepare_mix{
 	    my $ip = $sign * $c > 0 ? 0 : 1;
 
 	    my $ff = abs($c)." $s";
-	    $cir[$ip]{$ff} = join '', Chemistry::File::Formula->parse_formula($ff);
+
+	    my %e = Chemistry::File::Formula->parse_formula( $ff );
+	    $cir[$ip]{$ff} = join '', map( "$_$e{$_}", sort{ $a cmp $b} keys %e );
 	}
 	# Result
 	$_ = join(' == ', map{ join ' + ',sort {$_->{$a} cmp $_->{$b}} keys %{$_} } @cir);
@@ -1028,13 +1030,13 @@ sub _search_atoms_subs{
     my %tmp_subs;	# Atoms of substance
     my %atoms;		# Atom hash
 
-    for my $i (@{$chem_eq}){
-	for my $s (@{$i}){
+    for my $i ( @$chem_eq ){
+	for my $s ( @$i ){
 	    # Atoms of substance
-	    my %f = eval{ Chemistry::File::Formula->parse_formula($s) } or
+	    my %f = eval{ Chemistry::File::Formula->parse_formula( $s ) } or
 croak("'$s' is not substance!");
 
-	    for(keys %f){
+	    for( keys %f ){
 		$tmp_subs{$s}{$_} = $f{$_};
 		$atoms{$_}++; # Atom balance
 	    }
@@ -1058,7 +1060,7 @@ croak("'$s' is not substance!");
 sub brutto_formula{
     my $s = shift;
 
-    my %e = eval{ Chemistry::File::Formula->parse_formula($s) } or
+    my %e = eval{ Chemistry::File::Formula->parse_formula( $s ) } or
 croak("'$s' is not substance!");
 
     return( join( '', map{ "$_$e{$_}" } sort { $a cmp $b } keys %e ) );
@@ -1329,8 +1331,8 @@ sub _in_os{
 		# Search ion-group. Remove all atoms of element, except current
 		s{ ($m) }{ $1 if $count++ == $j }gex;
 
-		my %f = Chemistry::File::Formula->parse_formula($_);
-		push @{ $prop->{$e}{'num'} }, $f{$e};
+		my %f = Chemistry::File::Formula->parse_formula( $_ );
+		push @{ $prop->{ $e }{'num'} }, $f{ $e };
 	    }
 	}
     }
