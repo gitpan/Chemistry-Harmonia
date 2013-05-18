@@ -1,5 +1,8 @@
 Revision history for Perl extension Chemistry::Harmonia.
 
+0.111  2013-05-18
+	- Fixed tests for new subroutine stoichiometry()
+
 0.11  2013-05-17
 	- Added new powerfull subroutine stoichiometry()
 	- Added new subroutine brutto_formula()
@@ -7,7 +10,7 @@ Revision history for Perl extension Chemistry::Harmonia.
 	- Removing of points in late of the formulas
 	- Added tests, examples into documentation
 	- README revised
-	- Refused to use the module Regexp::Common (due to a problem of unpredictable changes. Replaced it a my code)
+	- Refused to use the module Regexp::Common (due to a problem of unpredictable changes. Replaced it a my pure perl code)
 	- High-speed optimization
 	- Algorithm of OSE recognition is refined
 	- Correction and optimization of sub 'good_formula'

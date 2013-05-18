@@ -8,14 +8,10 @@ use Chemistry::Harmonia qw( :all );
 
 ##### Test stoichiometry() #####
 
-my $dt = &datest;
+&_ts( &datest, { }, '' );
 
-for my $mix ( keys %$dt ){
-    is_deeply( [ sort @{ stoichiometry( $mix ) } ],
-		[ sort @{ $dt->{$mix} } ], "Stoichiometry test '$mix'" );
-}
-
-$dt = {
+&_ts( 
+    {
 	'KMnO4 + H2O2 + H2SO4 --> K2SO4 + MnSO4 + H2O + O2' =>
 	[
           '2 H2O + 3 H2SO4 + 2 KMnO4 == 5 H2O2 + 1 K2SO4 + 2 MnSO4',
@@ -30,25 +26,39 @@ $dt = {
 	    '3 O2 + 1 Cu2S + 1 SO2 == 2 CuSO4',
 	    '2 H2O + 1 O2 + 2 SO2 == 2 H2SO4'
 	],
-    };
+    },
+    { 'redox_pairs' => 0 }, "with 'redox_pairs' = 0" );
 
-for my $mix ( keys %$dt ){
-    is_deeply( [ sort @{ stoichiometry( $mix, { 'redox_pairs' => 0 } ) } ],
-		[ sort @{ $dt->{$mix} } ], "Stoichiometry test '$mix' with 'redox_pairs' = 0" );
-}
-
-$dt = {
+&_ts( 
+    {
 	'PbS + O3 --> PbSO4 + O2' =>
 	[
           '4 O3 + 1 PbS == 4 O2 + 1 PbSO4'
 	],
-    };
+    },
+    { 'coefficients'=>{ 'O3' => 4, 'O2' => 4 } }, "with 'coefficients'" );
 
-for my $mix ( keys %$dt ){
-    is_deeply( [ sort @{ stoichiometry( $mix, { 'coefficients'=>{ 'O3' => 4, 'O2' => 4 } } ) } ],
-		[ sort @{ $dt->{$mix} } ], "Stoichiometry test '$mix' with 'coefficients'" );
+
+exit;
+
+sub _ts{
+    my( $dt, $op, $msg ) = @_;
+
+    for my $mix ( keys %$dt ){
+	is_deeply( [ sort( map{
+			my %k;
+			my $ccn = class_cir_brutto( parse_chem_mix( $_, \%k ), \%k );
+			"$ccn->[0]$ccn->[1]";
+			} @{ stoichiometry( $mix, $op ) }
+		) ],
+		[ sort( map{
+			my %k;
+			my $ccn = class_cir_brutto( parse_chem_mix( $_, \%k ), \%k );
+			"$ccn->[0]$ccn->[1]";
+			} @{ $dt->{$mix} }
+		) ], "Stoichiometry test '$mix' $msg" );
+    }
 }
-
 
 exit;
 
